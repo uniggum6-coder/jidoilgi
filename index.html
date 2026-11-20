@@ -67,7 +67,7 @@
 
   /* ── 아래 단추 ── */
   #nav{
-    position:absolute;left:0;right:0;bottom:0;z-index:900;
+    position:absolute;left:0;right:0;bottom:0;z-index:1200;
     height:calc(60px + var(--safe-b));padding-bottom:var(--safe-b);
     background:#fff;border-top:1px solid var(--line);
     display:flex;align-items:stretch;
@@ -83,14 +83,14 @@
   }
   #nav button .ic svg{width:23px;height:23px;display:block;}
   #nav button.on{color:var(--navy);}
-  #nav button#navShoot{flex:0 0 86px;}
+  /* 촬영도 지도·기록과 같은 크기로. 가운데만 색으로 채워 눈에 띄게 한다. */
   #nav button#navShoot .ic{
-    width:62px;height:62px;border-radius:50%;
+    width:38px;height:38px;border-radius:50%;
     background:var(--navy);color:#fff;
     display:flex;align-items:center;justify-content:center;
-    margin-top:-26px;margin-bottom:2px;border:none;
+    margin:-4px 0 1px;border:none;
   }
-  #nav button#navShoot .ic svg{width:29px;height:29px;}
+  #nav button#navShoot .ic svg{width:21px;height:21px;}
   #nav button#navShoot:active .ic{transform:scale(.94);}
   #nav button#navShoot{color:var(--navy);}
 
