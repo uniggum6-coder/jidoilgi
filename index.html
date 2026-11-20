@@ -1437,20 +1437,6 @@ async function openRec(id){
   body.appendChild(s2);
   $('#memoEd').value = r.memo||'';
 
-  // 파일
-  if(media.length){
-    const s3 = el('div','sec');
-    s3.innerHTML = '<h3>사진·영상</h3>';
-    let tot=0;
-    media.forEach((m,i)=>{
-      tot += (m.size||0);
-      s3.appendChild(kv((i+1)+'.',
-        (m.type==='video' ? '영상 '+dur(m.dur||0) : '사진')+' · '+mb(m.size||0)));
-    });
-    s3.appendChild(kv('합계', mb(tot)));
-    body.appendChild(s3);
-  }
-
   const row1 = el('div','btnRow');
   const bSave = el('button','pri'); bSave.textContent='메모 저장';
   bSave.onclick = async ()=>{
