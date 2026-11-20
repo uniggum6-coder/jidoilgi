@@ -265,6 +265,12 @@
   }
   .bigArrow:active{background:rgba(0,0,0,.65);}
   .bigArrow.l{left:8px;} .bigArrow.r{right:8px;}
+  .bigDel{
+    position:absolute;right:8px;top:8px;z-index:4;border:none;
+    background:rgba(0,0,0,.5);color:#fff;border-radius:16px;
+    padding:6px 12px;font-size:12.5px;font-weight:700;
+  }
+  .bigDel:active{background:rgba(192,57,43,.9);}
   .bigArrow[disabled]{opacity:0;pointer-events:none;}
   #bigNav{
     display:flex;gap:6px;padding:7px 10px;overflow-x:auto;background:#111;
@@ -898,6 +904,7 @@ const CAM = (()=>{
   }
 
   async function open(){
+    clearTimeout(idleTimer);
     shots=[]; liveRecId=null; paintShots();
     $('#cam').classList.add('on');
     $('#camErr').classList.remove('on');
@@ -913,12 +920,17 @@ const CAM = (()=>{
       showErr(m);
     }
   }
+  let idleTimer = null;
   function close(){
     if(rec && rec.state==='recording'){ try{ rec.stop(); }catch(e){} }
     clearInterval(recTimer); recTimer=null;
     $('#recChip').classList.remove('on');
-    stopStream(); GPS.off(gpsPaint);
+    GPS.off(gpsPaint);
     liveRecId = null;                        // 닫으면 묶음이 끝난다
+    // 카메라는 바로 끄지 않는다. 끄면 다시 열 때 권한을 또 묻는 폰이 있다.
+    // 3분 동안 다시 안 쓰면 그때 끈다.
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(()=>{ stopStream(); }, 180000);
     $('#cam').classList.remove('on');
     shots.forEach(s=>{ if(s.thumbUrl) URL.revokeObjectURL(s.thumbUrl); });
     shots=[];
@@ -1254,6 +1266,7 @@ const CAM = (()=>{
   }
 
   return {open, close, takePhoto, startRec, stopRec, setMode, save,
+          release:()=>{ clearTimeout(idleTimer); stopStream(); },
           isRec:()=>!!(rec && rec.state==='recording'),
           mode:()=>mode};
 })();
@@ -1369,6 +1382,14 @@ async function openRec(id){
       }
       [...nav.children].forEach((b,j)=>b.classList.toggle('on', j===i));
 
+      const del = el('button','bigDel');
+      del.textContent = (m.type==='video' ? '영상 지우기' : '사진 지우기');
+      del.onclick = async e=>{
+        e.stopPropagation();
+        await removeMedia(r, i);
+      };
+      wrap.appendChild(del);
+
       if(media.length>1){
         const c = el('div','bigCount');
         c.textContent = (i+1)+' / '+media.length;
@@ -1472,6 +1493,39 @@ async function openRec(id){
   try{ history.pushState({v:'sheet'},''); }catch(e){}
   $('#sheet').classList.add('on');
 }
+/* 기록 안에서 사진·영상 한 개만 지우기 */
+async function removeMedia(r, i){
+  const m = (r.media||[])[i];
+  if(!m) return;
+  const what = (m.type==='video' ? '영상' : '사진');
+  const last = (r.media.length === 1);
+  const ok = await dialog({
+    title: what+'을 지웁니다',
+    text: last
+      ? '이 기록에 남은 마지막 '+what+'입니다. 지우면 기록도 함께 사라집니다. 되돌릴 수 없습니다.'
+      : '이 '+what+' 하나만 지웁니다. 되돌릴 수 없습니다.',
+    yes:'지우기', no:'그만두기', danger:true
+  });
+  if(!ok) return;
+  try{
+    if(last){
+      await DB.del(r.id);
+      await loadRecords();
+      closeSheet();
+      toast('기록을 지웠습니다.');
+      return;
+    }
+    r.media.splice(i,1);
+    await DB.put(r);
+    await loadRecords();
+    closeSheet();
+    await openRec(r.id);
+    toast(what+'을 지웠습니다. 남은 '+r.media.length+'개', 2600);
+  }catch(e){
+    toast('지우지 못했습니다: '+((e&&(e.name||e.message))||''), 4200);
+  }
+}
+
 function closeSheet(){
   $('#sheet').classList.remove('on');
   clearSheetUrls();
@@ -1692,6 +1746,11 @@ $('#dTo').onchange   = renderList;
 $('#dClear').onclick = ()=>{
   $('#srch').value=''; $('#dFrom').value=''; $('#dTo').value=''; renderList();
 };
+
+/* 다른 앱으로 가거나 화면을 끄면 카메라를 놓아준다 */
+document.addEventListener('visibilitychange', ()=>{
+  if(document.hidden && !$('#cam').classList.contains('on')) CAM.release();
+});
 
 /* 뒤로 가기로 창을 닫게 */
 window.addEventListener('popstate', ()=>{
