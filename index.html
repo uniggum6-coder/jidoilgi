@@ -860,23 +860,20 @@ const CAM = (()=>{
   }
 
   async function startStream(){
-    stopStream();
-    // 사진은 가장 높은 해상도로, 영상은 1080p 로 받는다.
-    // 영상까지 4K 로 받으면 폰이 눌러 담는 속도를 못 따라가 미리보기가 끊긴다.
-    const want = (mode==='video')
-      ? { video:{ facingMode:{ideal:'environment'},
-                  width:{ideal:1920}, height:{ideal:1080},
-                  frameRate:{ideal:30, max:30} },
-          audio:true }
-      : { video:{ facingMode:{ideal:'environment'},
-                  width:{ideal:3840}, height:{ideal:2160} },
-          audio:false };
+    if(stream) return;          // 이미 켜져 있으면 그대로 쓴다 (권한을 다시 묻지 않게)
+    // 사진과 영상이 한 카메라를 같이 쓴다. 모드를 오갈 때 껐다 켜지 않는다.
+    const want = {
+      video:{ facingMode:{ideal:'environment'},
+              width:{ideal:1920}, height:{ideal:1080},
+              frameRate:{ideal:30, max:30} },
+      audio:true
+    };
     try{
       stream = await navigator.mediaDevices.getUserMedia(want);
     }catch(e){
-      try{  // 해상도를 낮춰 다시
+      try{  // 소리까지는 못 주겠다고 하면 그림만이라도
         stream = await navigator.mediaDevices.getUserMedia(
-          {video:{facingMode:{ideal:'environment'}}, audio:(mode==='video')});
+          {video:{facingMode:{ideal:'environment'}}, audio:false});
       }catch(e2){ throw e2; }
     }
     const v = $('#camVideo');
@@ -1044,15 +1041,13 @@ const CAM = (()=>{
     if(rec && rec.state==='recording'){ try{ rec.stop(); }catch(e){} }
   }
 
-  async function setMode(m){
+  function setMode(m){
     if(mode===m) return;
     if(rec && rec.state==='recording') return;
-    mode=m;
+    mode=m;                      // 카메라는 그대로 두고 단추만 바꾼다
     $('#mPhoto').classList.toggle('on', m==='photo');
     $('#mVideo').classList.toggle('on', m==='video');
     $('#shutter').classList.remove('rec');
-    try{ await startStream(); }
-    catch(e){ showErr('카메라를 다시 열 수 없습니다.'); }
   }
 
   async function save(){
@@ -1126,7 +1121,16 @@ const CAM = (()=>{
       toast('기록을 저장했습니다.');
       if(recObj.lat!=null){ goMap(); map.setView([recObj.lat,recObj.lng], 16); }
     }catch(e){
-      toast('저장하지 못했습니다: '+(e && e.message ? e.message : '저장 공간 부족'), 4200);
+      const nm = (e && (e.name||'')) + '';
+      if(nm.indexOf('Quota')>=0 || nm.indexOf('QUOTA')>=0){
+        await dialog({
+          title:'폰 저장 공간이 찼습니다',
+          text:'이 브라우저가 쓸 수 있는 공간을 다 썼습니다. 기록을 내려받아 보관하신 뒤, 오래된 기록을 지우면 다시 저장됩니다.',
+          yes:'알겠습니다', noHide:true
+        });
+      } else {
+        toast('저장하지 못했습니다: '+(e && (e.name||e.message) ? (e.name||'')+' '+(e.message||'') : ''), 5000);
+      }
     }
   }
 
@@ -1535,7 +1539,18 @@ function goList(){
 async function loadRecords(){
   try{ records = await DB.all(); }
   catch(e){ records = []; toast('저장된 기록을 읽지 못했습니다.'); }
-  $('#hdrSub').textContent = records.length ? records.length+'개' : '';
+  let sub = records.length ? records.length+'개' : '';
+  try{
+    if(navigator.storage && navigator.storage.estimate){
+      const q = await navigator.storage.estimate();
+      if(q && q.quota){
+        const usedMB  = q.usage/1048576;
+        const quotaMB = q.quota/1048576;
+        sub += (sub?' · ':'') + usedMB.toFixed(0)+'/'+quotaMB.toFixed(0)+'MB';
+      }
+    }
+  }catch(e){}
+  $('#hdrSub').textContent = sub;
   renderList();
 }
 
