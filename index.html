@@ -1148,7 +1148,6 @@ const CAM = (()=>{
         try{
           const r = await DB.get(id);
           if(!r || !r.media || !r.media.length) return;
-          if(r.media.some(m=>m.type==='video')) return;
           if(r.media.every(m=>m.driveId)) return;
           await Drive.pushRecord(r);
           await Drive.writeIndex();
@@ -2092,7 +2091,36 @@ const Drive = (()=>{
     paint();
   }
 
-  return {signedIn, signIn, signOut, pushAll, pullAll, pushRecord,
+  /* 가져오고 올리기를 한 번에 — 손님은 방향을 생각할 필요가 없다 */
+  let lastSync = 0;
+  async function sync(onStep){
+    if(busy) return {got:0, sent:0};
+    busy = true;
+    try{
+      const got  = await pullAll(onStep);
+      const sent = await pushAll(onStep);
+      lastSync = Date.now();
+      try{ localStorage.setItem('jd_sync', String(lastSync)); }catch(e){}
+      return {got, sent};
+    } finally { busy = false; }
+  }
+  function lastSyncAt(){
+    if(lastSync) return lastSync;
+    try{ return Number(localStorage.getItem('jd_sync')||0); }catch(e){ return 0; }
+  }
+
+  /* 앱을 열 때 조용히 이어 붙기 (전에 허용한 적이 있으면 묻지 않는다) */
+  async function resume(){
+    try{
+      if(!window.google || !google.accounts || !google.accounts.oauth2) return false;
+      if(!localStorage.getItem('jd_me')) return false;
+      await getToken('none');
+      paint();
+      return true;
+    }catch(e){ return false; }
+  }
+
+  return {signedIn, signIn, signOut, pushAll, pullAll, pushRecord, sync, lastSyncAt, resume,
           fetchMedia, writeIndex, paint, who:()=>me,
           isBusy:()=>busy, setBusy:v=>{busy=v;}};
 })();
@@ -2102,44 +2130,57 @@ $('#btnDrive').onclick = async ()=>{
   if(!Drive.signedIn()){
     try{
       await Drive.signIn();
-      toast('로그인했습니다. 이제 드라이브에 올릴 수 있습니다.', 3000);
-      driveMenu();
+      toast('로그인했습니다. 기록을 맞추는 중입니다…', 2600);
+      await runSync(true);
     }catch(e){ toast(e.message || '로그인하지 못했습니다.', 3600); }
     return;
   }
   driveMenu();
 };
 
+/* 가져오고 올리기를 한 번에 한다 */
+async function runSync(quiet){
+  try{
+    const r = await Drive.sync();
+    const bits = [];
+    if(r.got)  bits.push('가져온 기록 '+r.got+'개');
+    if(r.sent) bits.push('올린 기록 '+r.sent+'개');
+    if(bits.length) toast(bits.join(' · '), 3400);
+    else if(!quiet) toast('이미 다 맞춰져 있습니다.', 2400);
+    Drive.paint();
+  }catch(e){
+    if(!quiet) toast('맞추지 못했습니다: '+(e.message||''), 4200);
+  }
+}
+
 async function driveMenu(){
-  const pick = await dialog({
+  const t = Drive.lastSyncAt();
+  await dialog({
     title:'구글 드라이브',
     text: (Drive.who()? Drive.who()+'\n' : '') +
-          '사진·영상은 손님 드라이브의 「지도일기」 폴더에 들어갑니다. 이 앱이 만든 파일만 다룹니다.',
+          '사진·영상과 메모가 손님 드라이브의 「지도일기」 폴더에 담깁니다. ' +
+          '이 앱이 만든 파일만 다룹니다.' +
+          (t ? '\n마지막으로 맞춘 때: '+fmtDT(t) : '\n아직 맞춘 적이 없습니다.'),
     html:'<label for="dAct">무엇을 할까요</label>'+
          '<select id="dAct">'+
-           '<option value="push">이 폰의 기록을 드라이브에 올리기</option>'+
-           '<option value="pull">드라이브에 있는 기록을 이 폰으로 가져오기</option>'+
+           '<option value="sync">지금 맞추기</option>'+
            '<option value="out">로그아웃</option>'+
          '</select>',
     yes:'하기', no:'닫기',
     hold: async (done)=>{
       const act = $('#dAct').value;
       if(act==='out'){ Drive.signOut(); done(true); toast('로그아웃했습니다.'); return; }
+      dlgProg('맞추는 중…');
       try{
-        if(act==='push'){
-          dlgProg('올리는 중…');
-          const n = await Drive.pushAll(nm=>dlgProg('올리는 중… '+nm));
-          dlgProg(''); done(true);
-          toast(n ? (n+'개 기록을 드라이브에 올렸습니다.') : '새로 올릴 것이 없습니다.', 3400);
-        } else {
-          dlgProg('가져오는 중…');
-          const n = await Drive.pullAll(t=>dlgProg('가져오는 중… '+t));
-          dlgProg(''); done(true);
-          toast(n ? (n+'개 기록을 가져왔습니다.') : '가져올 새 기록이 없습니다.', 3400);
-        }
+        const r = await Drive.sync(x=>dlgProg('맞추는 중… '+x));
+        dlgProg(''); done(true);
+        const bits=[];
+        if(r.got)  bits.push('가져온 기록 '+r.got+'개');
+        if(r.sent) bits.push('올린 기록 '+r.sent+'개');
+        toast(bits.length? bits.join(' · ') : '이미 다 맞춰져 있습니다.', 3400);
       }catch(e){
         dlgProg('');
-        toast('드라이브 작업에 실패했습니다: '+(e.message||''), 4600);
+        toast('맞추지 못했습니다: '+(e.message||''), 4600);
       }
     }
   });
