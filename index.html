@@ -72,6 +72,7 @@
     background:#fff;border-top:1px solid var(--line);
     display:flex;align-items:stretch;
   }
+  #nav{overflow:visible;}
   #nav button{
     flex:1;background:none;border:none;display:flex;flex-direction:column;
     align-items:center;justify-content:center;gap:2px;color:#8b9795;font-size:11px;
@@ -82,15 +83,14 @@
   }
   #nav button .ic svg{width:23px;height:23px;display:block;}
   #nav button.on{color:var(--navy);}
-  #nav button#navShoot{flex:0 0 82px;}
+  #nav button#navShoot{flex:0 0 86px;}
   #nav button#navShoot .ic{
-    width:52px;height:52px;border-radius:50%;
-    background:linear-gradient(160deg, #1f6f6b 0%, #0f3d3e 100%);
-    color:#fff;display:flex;align-items:center;justify-content:center;
-    margin-bottom:-3px;box-shadow:0 3px 10px rgba(15,61,62,.38);
-    border:3px solid #fff;
+    width:62px;height:62px;border-radius:50%;
+    background:var(--navy);color:#fff;
+    display:flex;align-items:center;justify-content:center;
+    margin-top:-26px;margin-bottom:2px;border:none;
   }
-  #nav button#navShoot .ic svg{width:25px;height:25px;}
+  #nav button#navShoot .ic svg{width:29px;height:29px;}
   #nav button#navShoot:active .ic{transform:scale(.94);}
   #nav button#navShoot{color:var(--navy);}
 
