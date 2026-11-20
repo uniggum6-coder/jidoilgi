@@ -1876,7 +1876,7 @@ window.addEventListener('popstate', ()=>{
    - 권한은 drive.file 하나뿐: 이 앱이 만든 파일만 다룬다.
    ====================================================================== */
 const GCLIENT_ID = '541026371687-lpvde8mc2elghdudpje7p2598dv837ah.apps.googleusercontent.com';
-const GSCOPE     = 'https://www.googleapis.com/auth/drive.file';
+const GSCOPE     = 'openid email https://www.googleapis.com/auth/drive.file';
 const FOLDER     = '지도일기';
 const INDEX_FILE = '기록목록.json';
 
@@ -2081,13 +2081,18 @@ const Drive = (()=>{
       const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {headers:hdr()});
       if(r.ok){ const u = await r.json(); me = u.email || u.name || ''; }
     }catch(e){}
-    try{ localStorage.setItem('jd_me', me); }catch(e){}
+    try{
+      localStorage.setItem('jd_me', me);
+      localStorage.setItem('jd_linked', '1');     // 로그인한 적이 있다는 표시
+    }catch(e){}
     paint();
   }
 
   function signOut(){
     try{ if(token && google.accounts.oauth2) google.accounts.oauth2.revoke(token, ()=>{}); }catch(e){}
     token=null; tokenAt=0; folderId=null; indexId=null;
+    try{ localStorage.removeItem('jd_linked'); localStorage.removeItem('jd_me'); }catch(e){}
+    me='';
     paint();
   }
 
@@ -2113,7 +2118,7 @@ const Drive = (()=>{
   async function resume(){
     try{
       if(!window.google || !google.accounts || !google.accounts.oauth2) return false;
-      if(!localStorage.getItem('jd_me')) return false;
+      if(!localStorage.getItem('jd_linked')) return false;
       await getToken('none');
       paint();
       return true;
