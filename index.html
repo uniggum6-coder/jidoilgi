@@ -436,6 +436,7 @@ function accGrade(a){           // 오차 등급
 }
 function accText(a){
   if(a==null) return '위치 없음';
+  if(a >= 1000) return '±' + (a/1000).toFixed(a>=10000?0:1) + 'km';
   return '±' + (a<10 ? a.toFixed(1) : Math.round(a)) + 'm';
 }
 function pad(n){ return n<10 ? '0'+n : ''+n; }
@@ -579,8 +580,10 @@ const GPS = (()=>{
     if(!best || f.acc <= best.acc || (Date.now()-best.t) > KEEP) best = f;
     listeners.forEach(fn=>{ try{ fn(current()); }catch(e){} });
   }
+  let lastErr = null;
   function onErr(e){
-    listeners.forEach(fn=>{ try{ fn(null, e); }catch(_){} });
+    lastErr = e;
+    listeners.forEach(fn=>{ try{ fn(current(), e); }catch(_){} });
   }
   function current(){
     if(best && (Date.now()-best.t) <= KEEP) return best;
@@ -599,7 +602,22 @@ const GPS = (()=>{
       if(watchId!=null){ navigator.geolocation.clearWatch(watchId); watchId=null; }
     },
     reset(){ best=null; },
+    err(){ return lastErr; },
     current,
+    // 지금 당장 한 번 받아본다 (watch 와 별개)
+    once(ms){
+      return new Promise(res=>{
+        if(!navigator.geolocation) return res(null);
+        let done=false;
+        const fin = v=>{ if(!done){ done=true; res(v); } };
+        navigator.geolocation.getCurrentPosition(
+          p=>{ onFix(p); fin(current()); },
+          e=>{ lastErr=e; fin(current()); },
+          {enableHighAccuracy:true, timeout:(ms||10000), maximumAge:0}
+        );
+        setTimeout(()=>fin(current()), (ms||10000)+500);
+      });
+    },
     on(fn){ listeners.push(fn); },
     off(fn){ listeners = listeners.filter(x=>x!==fn); }
   };
@@ -706,15 +724,8 @@ function drawPins(list){
   list.forEach(r=>{
     if(r.lat==null) return;
     const m = L.marker([r.lat,r.lng], {icon:pinIcon(accGrade(r.acc))});
-    const memo = r.memo ? r.memo.replace(/[<>&]/g,'') : '(메모 없음)';
-    const short = memo.length>40 ? memo.slice(0,40)+'…' : memo;
-    const n = (r.media||[]).length;
-    m.bindPopup(
-      '<div class="pm">'+short+'</div>'+
-      '<div class="pd">'+fmtDT(r.createdAt)+' · '+accText(r.acc)+
-      (n?' · 사진·영상 '+n+'개':'')+'</div>'+
-      '<button onclick="openRec(\''+r.id+'\')">크게 보기</button>'
-    );
+    // 핀을 누르면 사진·영상·메모가 바로 열린다
+    m.on('click', ()=>openRec(r.id));
     markerLayer.addLayer(m);
   });
 }
@@ -729,9 +740,18 @@ const CAM = (()=>{
 
   function gpsPaint(fix){
     const dot=$('#gpsDot'), txt=$('#gpsTxt'), note=$('#gpsNote');
+    const er = GPS.err();
     if(!fix){
+      if(er && er.code===1){
+        dot.className='b'; txt.textContent='위치 막힘';
+        note.style.display='';
+        note.textContent='이 브라우저에서 위치가 막혀 있습니다. 주소창 왼쪽 아이콘을 눌러 위치를 허용해 주십시오. 지금 찍으면 위치 없이 기록됩니다.';
+        return;
+      }
       dot.className=''; txt.textContent='위치 찾는 중';
-      note.style.display='none'; return;
+      note.style.display= er ? '' : 'none';
+      if(er) note.textContent='위치를 아직 받지 못했습니다. 하늘이 트인 쪽으로 나가 보십시오.';
+      return;
     }
     const g = accGrade(fix.acc);
     dot.className = g;
@@ -928,6 +948,24 @@ const CAM = (()=>{
     // 여러 장 가운데 가장 정확한 위치를 그 기록의 위치로 쓴다
     let fix=null;
     shots.forEach(s=>{ if(s.fix && (!fix || s.fix.acc < fix.acc)) fix = s.fix; });
+
+    // 한 장도 위치를 못 받았으면 여기서 다시 한 번 받아본다
+    if(!fix){
+      toast('위치를 받는 중입니다. 잠시만 기다려 주십시오.', 9000);
+      fix = await GPS.once(9000);
+      if(!fix){
+        const er = GPS.err();
+        const why = (er && er.code===1)
+          ? '이 브라우저에서 위치가 막혀 있습니다.'
+          : '위치를 받지 못했습니다. 실내이거나 신호가 약한 곳일 수 있습니다.';
+        const go = await dialog({
+          title:'위치 없이 저장할까요',
+          text: why + ' 위치 없이 저장하면 지도에 뜨지 않고 기록 목록에만 남습니다.',
+          yes:'위치 없이 저장', no:'그만두기'
+        });
+        if(!go) return;
+      }
+    }
 
     const now = Date.now();
     const recObj = {
