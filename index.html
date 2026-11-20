@@ -561,6 +561,22 @@ const DB = (()=>{
 
 let records = [];   // 머리 속 사본 (최근순)
 
+/* 사진·영상은 기기에 '덩어리(ArrayBuffer)'로 저장한다.
+   폰 브라우저 중에는 Blob 을 그대로 넣으면 나중에 못 꺼내는 것이 있다. */
+function mediaMime(m){
+  return m.mime || (m.type==='video' ? 'video/mp4' : 'image/jpeg');
+}
+function mediaBlob(m){
+  if(m.blob) return m.blob;                       // 옛 기록
+  if(m.buf)  return new Blob([m.buf], {type:mediaMime(m)});
+  return null;
+}
+function thumbBlob(m){
+  if(m.thumb) return m.thumb;                     // 옛 기록
+  if(m.thumbBuf) return new Blob([m.thumbBuf], {type:'image/jpeg'});
+  return null;
+}
+
 /* ── 위치 잡기 ─────────────────────────────────────────────────── */
 const GPS = (()=>{
   let watchId=null, best=null, last=null, listeners=[];
@@ -979,10 +995,14 @@ const CAM = (()=>{
       heading: fix? fix.heading : null,  // 방위 — 같음
       origLat:null, origLng:null, moved:false,
       memo: memo,
-      media: shots.map(s=>({
-        type:s.type, blob:s.blob, thumb:s.thumb, size:s.size,
-        dur:(s.dur||null), mime:(s.mime||s.blob.type||'')
-      }))
+      media: await Promise.all(shots.map(async s=>({
+        type: s.type,
+        mime: (s.mime || (s.blob && s.blob.type) || ''),
+        size: s.size,
+        dur:  (s.dur||null),
+        buf:      await s.blob.arrayBuffer(),
+        thumbBuf: await s.thumb.arrayBuffer()
+      })))
     };
     try{
       await DB.put(recObj);
@@ -1044,7 +1064,8 @@ function renderList(){
     const tb = el('div','thbox');
     const m0 = (r.media||[])[0];
     const img = el('img','th');
-    if(m0 && m0.thumb){ const u=URL.createObjectURL(m0.thumb); thumbUrls.push(u); img.src=u; }
+    const t0 = m0 ? thumbBlob(m0) : null;
+    if(t0){ const u=URL.createObjectURL(t0); thumbUrls.push(u); img.src=u; }
     tb.appendChild(img);
     const vids = (r.media||[]).filter(m=>m.type==='video').length;
     const n = (r.media||[]).length;
@@ -1090,19 +1111,31 @@ async function openRec(id){
     const show = i=>{
       wrap.innerHTML='';
       const m = media[i];
-      const u = URL.createObjectURL(m.blob); sheetUrls.push(u);
+      const b = mediaBlob(m);
+      if(!b || !b.size){
+        const p=el('div');
+        p.style.cssText='color:#bbb;padding:26px 18px;font-size:13.5px;line-height:1.6;text-align:center;';
+        p.textContent='이 사진·영상은 기기에서 꺼내지 못했습니다.';
+        wrap.appendChild(p);
+        return;
+      }
+      const u = URL.createObjectURL(b); sheetUrls.push(u);
       if(m.type==='video'){
         const v=el('video'); v.src=u; v.controls=true; v.playsInline=true;
+        v.onerror=()=>{ wrap.innerHTML='<div style="color:#bbb;padding:26px;text-align:center;font-size:13.5px">영상을 열지 못했습니다.</div>'; };
         wrap.appendChild(v);
       } else {
-        const im=el('img'); im.src=u; wrap.appendChild(im);
+        const im=el('img'); im.src=u;
+        im.onerror=()=>{ wrap.innerHTML='<div style="color:#bbb;padding:26px;text-align:center;font-size:13.5px">사진을 열지 못했습니다.</div>'; };
+        wrap.appendChild(im);
       }
       [...nav.children].forEach((b,j)=>b.classList.toggle('on', j===i));
     };
     media.forEach((m,i)=>{
       const b=el('button');
       const im=el('img');
-      if(m.thumb){ const tu=URL.createObjectURL(m.thumb); sheetUrls.push(tu); im.src=tu; }
+      const tb = thumbBlob(m);
+      if(tb){ const tu=URL.createObjectURL(tb); sheetUrls.push(tu); im.src=tu; }
       b.appendChild(im);
       b.onclick=()=>show(i);
       nav.appendChild(b);
@@ -1289,8 +1322,8 @@ async function doExport(){
               ext = (m.mime||'').includes('mp4') ? 'mp4' : 'webm';
             }
             const nm = stamp + (media.length>1 ? '_'+(j+1) : '') + '.' + ext;
-            names.push(nm);
-            folder.file(nm, m.blob);
+            const mb2 = mediaBlob(m);
+            if(mb2){ names.push(nm); folder.file(nm, mb2); }
           }
           rows.push([
             i+1,
