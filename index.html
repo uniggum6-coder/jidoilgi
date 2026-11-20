@@ -371,9 +371,13 @@
     }
     #srchWrap{padding:10px 12px 8px;}
     #cards .card{margin-left:12px;margin-right:12px;}
+    /* 아래 단추도 왼쪽 칸 아래에 둔다 */
     #nav{
-      left:auto;right:0;width:400px;border-left:1px solid var(--line);
+      left:0;right:auto;width:400px;border-right:1px solid var(--line);
     }
+    /* 지도 확대 단추가 왼쪽 칸에 가리지 않게 오른쪽으로 밀어둔다 */
+    .leaflet-top.leaflet-left{left:408px;}
+    #listPage{z-index:1100;}
     #mapHint{left:420px;right:14px;}
   }
 
