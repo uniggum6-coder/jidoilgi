@@ -765,7 +765,13 @@ const GPS = (()=>{
   };
 })();
 
-/* ── 좌표를 주소로 바꾸기 (카카오) ──────────────────────────── */
+/* 에스리 열쇠 — 해외 위성사진과 해외 주소에 쓴다.
+   https://uniggum6-coder.github.io 에서 온 요청만 받도록 걸어 두었다. */
+const ESRI_KEY = 'AAPTahJuaRYYYOaH7WEomga86rw..5_uWbw-t4ah2knNd1x8TEDhxtcl54WG7f2mh5hlz8Hgra0OVXjJJZqmpKAB9UODpyvSNLMuBn9Vg51WcQAnQ7u-MMwJudvUMJ83e2CeqmYrr6j1CLtvHTQlexh1EDCrSvK9EuWGZlyej5dQ5T47tbq9-bl9xtyEF-XaP-jmlmW0FNfDdz8xUwGNwXkt7Va3MR-RY3Hp97W4CDSxnWP3GhysBa7pXAPXuS1lMIWaQ_7q6l5yTfZM9cu8.AT1_1cOywK0F';
+
+/* ── 좌표를 주소로 바꾸기 ───────────────────────────────────────
+   국내는 카카오, 바다를 건너면 에스리가 맡는다.
+   ========================================================== */
 let kakaoReady = false, kakaoGeo = null;
 (function initKakao(){
   try{
@@ -777,8 +783,8 @@ let kakaoReady = false, kakaoGeo = null;
   }catch(e){}
 })();
 
-/* 그 자리의 주소를 받아온다. 못 받으면 null 을 준다. */
-function addressOf(lat, lng){
+/* 국내 — 카카오 */
+function kakaoAddr(lat, lng){
   return new Promise(res=>{
     if(!kakaoReady || !kakaoGeo) return res(null);
     try{
@@ -791,6 +797,30 @@ function addressOf(lat, lng){
     }catch(e){ res(null); }
     setTimeout(()=>res(null), 6000);
   });
+}
+
+/* 해외 — 에스리. 그 나라 말로 된 주소가 돌아온다. */
+async function esriAddr(lat, lng){
+  try{
+    const u = 'https://geocode-api.arcgis.com/arcgis/rest/services/World/GeocodeServer/reverseGeocode'
+            + '?f=json&location=' + lng + ',' + lat + '&token=' + ESRI_KEY;
+    const r = await fetch(u);
+    if(!r.ok) return null;
+    const j = await r.json();
+    const a = j && j.address;
+    if(!a) return null;
+    const txt = a.LongLabel || a.Match_addr || '';
+    return txt ? {road: txt, jibun: ''} : null;
+  }catch(e){ return null; }
+}
+
+/* 그 자리의 주소를 받아온다. 못 받으면 null 을 준다. */
+async function addressOf(lat, lng){
+  if(inKorea({lat:lat, lng:lng})){
+    const a = await kakaoAddr(lat, lng);
+    if(a) return a;
+  }
+  return await esriAddr(lat, lng);
 }
 
 /* 주소 글귀 한 줄로 */
@@ -910,7 +940,7 @@ function initMap(){
 
   // 해외 위성사진. 브이월드는 국내만 나오므로 한반도를 벗어나면 이걸 쓴다.
   esriSat = L.tileLayer(
-    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    'https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}?token='+ESRI_KEY,
     {maxZoom:19, minZoom:3, attribution:ATTR_ESRI});
 
   osmTiles.addTo(map);
