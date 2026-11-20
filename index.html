@@ -359,9 +359,22 @@
       box-shadow:6px 0 26px rgba(0,0,0,.22);
     }
     #bigWrap img,#bigWrap video{max-height:42vh;}
-    #srchWrap,#cnt,#cards{max-width:620px;margin-left:auto;margin-right:auto;}
-    #cards .card{margin-left:0;margin-right:0;}
     #toast{left:auto;right:28px;transform:none;bottom:88px;}
+
+    /* 지도는 늘 보인다. 기록 목록은 왼쪽 좁은 칸으로 그 위에 얹힌다. */
+    #mapPage{display:block;}
+    #listPage{
+      width:400px;right:auto;
+      border-right:1px solid var(--line);
+      box-shadow:6px 0 26px rgba(0,0,0,.18);
+      z-index:600;
+    }
+    #srchWrap{padding:10px 12px 8px;}
+    #cards .card{margin-left:12px;margin-right:12px;}
+    #nav{
+      left:auto;right:0;width:400px;border-left:1px solid var(--line);
+    }
+    #mapHint{left:420px;right:14px;}
   }
 
   /* 지도 단추 */
@@ -720,6 +733,16 @@ const ATTR_VW  = '&copy; <a href="https://www.vworld.kr" target="_blank" rel="no
 
 let baseMode='base', satDead=false, osmTiles, satGroup;
 
+/* 두 자리 사이의 거리 (m) */
+function distM(a, b){
+  if(!a || !b || a.lat==null || b.lat==null) return Infinity;
+  const R = 6371000, toRad = d=>d*Math.PI/180;
+  const dLat = toRad(b.lat-a.lat), dLng = toRad(b.lng-a.lng);
+  const la1 = toRad(a.lat), la2 = toRad(b.lat);
+  const x = Math.sin(dLat/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(x));
+}
+
 function pinIcon(grade, big, count){
   const col = grade==='g' ? '#1b8a4b' : grade==='w' ? '#c08a0a' : '#c0392b';
   const w = big?36:30, h = big?46:38;
@@ -814,14 +837,17 @@ function drawPins(list){
   if(!markerLayer) return;
   markerLayer.clearLayers();
 
-  // 거의 같은 자리(약 10m 안)의 기록은 한 핀으로 묶는다.
-  // 안 그러면 핀이 포개져서 맨 위 하나만 열린다.
-  const groups = new Map();
+  // 가까운 자리의 기록은 한 핀으로 묶는다. 좌표를 반올림하지 않고 실제 거리로 잰다.
+  // GPS 는 같은 자리에서도 몇 미터씩 흔들려서, 반올림으로 묶으면 자꾸 갈라진다.
+  const GROUP_M = 30;
+  const groups = [];
   list.forEach(r=>{
     if(r.lat==null) return;
-    const key = r.lat.toFixed(4)+','+r.lng.toFixed(4);
-    if(!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(r);
+    let put = null;
+    for(const g of groups){
+      if(distM(g[0], r) <= GROUP_M){ put = g; break; }
+    }
+    if(put) put.push(r); else groups.push([r]);
   });
 
   groups.forEach(g=>{
