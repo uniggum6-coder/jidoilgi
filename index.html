@@ -126,6 +126,12 @@
     border-radius:5px;font-size:10px;padding:1px 4px;font-weight:600;
   }
   .card .bd{flex:1;min-width:0;}
+  .card .del{
+    flex:0 0 auto;align-self:center;border:1px solid var(--line);background:#fff;
+    color:#b4452f;border-radius:9px;width:30px;height:30px;font-size:16px;
+    line-height:1;padding:0;margin-left:2px;
+  }
+  .card .del:active{background:#fbe6e3;}
   .card .dt{font-size:12px;color:#7b8785;font-weight:600;}
   .card .mm{
     font-size:13.5px;margin:3px 0 5px;color:var(--ink);
@@ -691,10 +697,13 @@ function pinIcon(grade, big, count){
   const col = grade==='g' ? '#1b8a4b' : grade==='w' ? '#c08a0a' : '#c0392b';
   const w = big?36:30, h = big?46:38;
   const n = count||1;
+  // 개수는 있는 그대로 보여준다. 자릿수가 늘면 글자만 작게 한다.
+  const digits = String(n).length;
+  const fs = digits<=2 ? 10 : (digits===3 ? 8 : 6.6);
   const inner = (n>1)
-    ? '<circle cx="15" cy="13.6" r="7.6" fill="#fff"/>'+
-      '<text x="15" y="17.4" text-anchor="middle" font-size="10" font-weight="700" '+
-      'font-family="sans-serif" fill="'+col+'">'+(n>9?'9+':n)+'</text>'
+    ? '<circle cx="15" cy="13.6" r="8" fill="#fff"/>'+
+      '<text x="15" y="'+(13.6+fs*0.36)+'" text-anchor="middle" font-size="'+fs+'" '+
+      'font-weight="700" font-family="sans-serif" fill="'+col+'">'+n+'</text>'
     : '<circle cx="15" cy="13.6" r="4.6" fill="#fff"/>';
   const svg =
     '<svg class="pinico" width="'+w+'" height="'+h+'" viewBox="0 0 30 38" '+
@@ -829,6 +838,7 @@ function openGroup(g){
     const a = el('span','acc '+accGrade(r.acc)); a.textContent = accText(r.acc);
     me.appendChild(a); bd.appendChild(me);
     c.appendChild(bd);
+    c.appendChild(delBtn(r));
     c.onclick = ()=>openRec(r.id);
     box.appendChild(c);
   });
@@ -1333,6 +1343,7 @@ function renderList(){
     if(vids){ const s=el('span'); s.textContent='영상 '+vids+'개'; me.appendChild(s); }
     bd.appendChild(me);
     c.appendChild(bd);
+    c.appendChild(delBtn(r));
     c.onclick = ()=>openRec(r.id);
     box.appendChild(c);
   });
@@ -1493,6 +1504,32 @@ async function openRec(id){
   try{ history.pushState({v:'sheet'},''); }catch(e){}
   $('#sheet').classList.add('on');
 }
+/* 목록에서 기록 하나를 통째로 지우는 단추 */
+function delBtn(r){
+  const b = el('button','del');
+  b.textContent = '✕';
+  b.title = '이 기록 지우기';
+  b.onclick = async e=>{
+    e.stopPropagation();
+    const n = (r.media||[]).length;
+    const ok = await dialog({
+      title:'이 기록을 지웁니다',
+      text: fmtDT(r.createdAt)+'에 남긴 기록입니다. 사진·영상 '+n+'개와 메모가 함께 사라집니다. 되돌릴 수 없습니다.',
+      yes:'지우기', no:'그만두기', danger:true
+    });
+    if(!ok) return;
+    try{
+      await DB.del(r.id);
+      await loadRecords();
+      if($('#sheet').classList.contains('on')) closeSheet();
+      toast('기록을 지웠습니다.');
+    }catch(err){
+      toast('지우지 못했습니다: '+((err&&(err.name||err.message))||''), 4200);
+    }
+  };
+  return b;
+}
+
 /* 기록 안에서 사진·영상 한 개만 지우기 */
 async function removeMedia(r, i){
   const m = (r.media||[])[i];
