@@ -280,12 +280,15 @@
   }
   .bigArrow:active{background:rgba(0,0,0,.65);}
   .bigArrow.l{left:8px;} .bigArrow.r{right:8px;}
-  .bigDel{
-    position:absolute;right:8px;top:8px;z-index:4;border:none;
+  .bigDel,.bigSave{
+    position:absolute;top:8px;z-index:4;border:none;
     background:rgba(0,0,0,.5);color:#fff;border-radius:16px;
     padding:6px 12px;font-size:12.5px;font-weight:700;
   }
+  .bigDel{right:8px;}
+  .bigSave{left:8px;}
   .bigDel:active{background:rgba(192,57,43,.9);}
+  .bigSave:active{background:rgba(31,111,107,.95);}
   .bigArrow[disabled]{opacity:0;pointer-events:none;}
   #bigNav{
     display:flex;gap:6px;padding:7px 10px;overflow-x:auto;background:#111;
@@ -1520,6 +1523,11 @@ async function openRec(id){
       }
       [...nav.children].forEach((b,j)=>b.classList.toggle('on', j===i));
 
+      const sv = el('button','bigSave');
+      sv.textContent = (m.type==='video' ? '영상 저장' : '사진 저장');
+      sv.onclick = e=>{ e.stopPropagation(); saveToPhone(r, i); };
+      wrap.appendChild(sv);
+
       const del = el('button','bigDel');
       del.textContent = (m.type==='video' ? '영상 지우기' : '사진 지우기');
       del.onclick = async e=>{
@@ -1671,6 +1679,39 @@ function delBtn(r){
     }
   };
   return b;
+}
+
+/* 보고 있는 사진·영상 한 개를 폰에 저장(또는 다른 앱으로 보내기) */
+async function saveToPhone(r, i){
+  const m = (r.media||[])[i];
+  if(!m) return;
+  const b = mediaBlob(m);
+  if(!b || !b.size){ toast('아직 받아오지 못했습니다. 잠시 뒤 다시 눌러 주십시오.', 3000); return; }
+
+  const ext = (m.type==='video') ? ((m.mime||'').includes('mp4')?'mp4':'webm') : 'jpg';
+  const name = (m.name || ('지도일기_'+fileStamp(r.createdAt)+'_'+(i+1)+'.'+ext));
+  const file = new File([b], name, {type: m.mime || b.type || 'application/octet-stream'});
+
+  // 폰에서는 '공유'로 보내면 갤러리에 저장하거나 카톡으로 바로 보낼 수 있다
+  try{
+    if(navigator.canShare && navigator.canShare({files:[file]})){
+      await navigator.share({files:[file], title:'지도일기'});
+      return;
+    }
+  }catch(e){
+    if(e && e.name === 'AbortError') return;      // 손님이 그만둔 것
+  }
+
+  // 그 밖에는 그냥 내려받는다
+  try{
+    const u = URL.createObjectURL(b);
+    const a = el('a'); a.href = u; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(u), 30000);
+    toast('내려받았습니다. 폰의 "다운로드" 폴더에 있습니다.', 3400);
+  }catch(e){
+    toast('저장하지 못했습니다.', 3000);
+  }
 }
 
 /* 기록 안에서 사진·영상 한 개만 지우기 */
