@@ -494,6 +494,7 @@
 <div id="toast"></div>
 
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=8bf11206949bd1d16138dfca2f5d7248&libraries=services&autoload=false"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -728,6 +729,34 @@ const GPS = (()=>{
     off(fn){ listeners = listeners.filter(x=>x!==fn); }
   };
 })();
+
+/* ── 좌표를 주소로 바꾸기 (카카오) ──────────────────────────── */
+let kakaoReady = false, kakaoGeo = null;
+(function initKakao(){
+  try{
+    if(window.kakao && kakao.maps && kakao.maps.load){
+      kakao.maps.load(()=>{
+        try{ kakaoGeo = new kakao.maps.services.Geocoder(); kakaoReady = true; }catch(e){}
+      });
+    }
+  }catch(e){}
+})();
+
+/* 그 자리의 주소를 받아온다. 못 받으면 null 을 준다. */
+function addressOf(lat, lng){
+  return new Promise(res=>{
+    if(!kakaoReady || !kakaoGeo) return res(null);
+    try{
+      kakaoGeo.coord2Address(lng, lat, (r, st)=>{
+        if(st !== kakao.maps.services.Status.OK || !r || !r[0]) return res(null);
+        const road = r[0].road_address && r[0].road_address.address_name;
+        const jibun = r[0].address && r[0].address.address_name;
+        res({road: road||'', jibun: jibun||''});
+      });
+    }catch(e){ res(null); }
+    setTimeout(()=>res(null), 6000);
+  });
+}
 
 /* ── 지도 ──────────────────────────────────────────────────────── */
 let map, markerLayer, meMarker, fixMarker=null, fixRec=null;
@@ -1551,8 +1580,24 @@ async function openRec(id){
     return d;
   };
   if(r.lat!=null){
+    const addrRow = kv('주소', r.addr ? r.addr : '<span style="color:#a8b2b0">받는 중…</span>');
+    s1.appendChild(addrRow);
     s1.appendChild(kv('좌표', r.lat.toFixed(6)+', '+r.lng.toFixed(6)));
     s1.appendChild(kv('오차', '<span class="acc '+accGrade(r.acc)+'">'+accText(r.acc)+'</span>'));
+    if(!r.addr){
+      addressOf(r.lat, r.lng).then(async a=>{
+        if(!a) {
+          const v = addrRow.querySelector('.v');
+          if(v) v.innerHTML = '<span style="color:#a8b2b0">주소를 찾지 못했습니다</span>';
+          return;
+        }
+        const txt = a.road ? (a.road + (a.jibun ? '  ('+a.jibun+')' : '')) : a.jibun;
+        r.addr = txt;
+        try{ await DB.put(r); await loadRecords(); }catch(e){}
+        const v = addrRow.querySelector('.v');
+        if(v) v.textContent = txt;
+      });
+    }
     if(r.moved && r.origLat!=null){
       s1.appendChild(kv('원래 좌표', r.origLat.toFixed(6)+', '+r.origLng.toFixed(6)));
     }
@@ -1747,7 +1792,7 @@ async function doExport(){
         const zip = new JSZip();
         const folder = zip.folder('사진영상');
         const rows = [[
-          '번호','날짜','시각','위도','경도','오차(m)','고도(m)','고도오차(m)','방위(도)',
+          '번호','날짜','시각','주소','위도','경도','오차(m)','고도(m)','고도오차(m)','방위(도)',
           '위치 손봄','원래 위도','원래 경도','메모','파일'
         ]];
 
@@ -1772,6 +1817,7 @@ async function doExport(){
             i+1,
             d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()),
             pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds()),
+            r.addr || '',
             r.lat!=null ? Number(r.lat.toFixed(6)) : '',
             r.lng!=null ? Number(r.lng.toFixed(6)) : '',
             r.acc!=null ? Number(r.acc.toFixed(1)) : '',
@@ -1790,7 +1836,7 @@ async function doExport(){
         }
 
         const ws = XLSX.utils.aoa_to_sheet(rows);
-        ws['!cols'] = [{wch:5},{wch:11},{wch:9},{wch:11},{wch:12},{wch:8},{wch:8},
+        ws['!cols'] = [{wch:5},{wch:11},{wch:9},{wch:34},{wch:11},{wch:12},{wch:8},{wch:8},
                        {wch:10},{wch:8},{wch:9},{wch:11},{wch:12},{wch:44},{wch:30}];
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, '기록');
@@ -2021,7 +2067,7 @@ const Drive = (()=>{
     return {
       id:r.id, createdAt:r.createdAt, lat:r.lat, lng:r.lng, acc:r.acc,
       alt:r.alt, altAcc:r.altAcc, heading:r.heading,
-      origLat:r.origLat, origLng:r.origLng, moved:!!r.moved, memo:r.memo||'',
+      origLat:r.origLat, origLng:r.origLng, moved:!!r.moved, memo:r.memo||'', addr:r.addr||'',
       media:(r.media||[]).filter(m=>m.driveId).map(m=>({
         type:m.type, mime:m.mime, size:m.size, dur:m.dur,
         name:m.name, driveId:m.driveId, thumbId:m.thumbId||null
