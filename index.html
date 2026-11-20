@@ -210,6 +210,12 @@
     flex:0 0 62px;margin:0 auto;padding:0;
   }
   #shutter:active{transform:scale(.94);}
+  #shutter:disabled{opacity:.45;}
+  #flash{
+    position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;
+    transition:opacity .12s;
+  }
+  #flash.on{opacity:.85;transition:none;}
   #shutter.rec{background:#e74c3c;border-color:#fff;border-radius:16px;width:56px;height:56px;}
   #camDone{
     background:var(--navy);color:#fff;border:none;border-radius:18px;padding:9px 15px;
@@ -372,6 +378,7 @@
     </div>
     <div id="gpsNote"></div>
     <div id="recChip"><span class="blink"></span><span id="recTime">0:00</span> / 3:00</div>
+    <div id="flash"></div>
     <div id="shots"></div>
     <div id="camErr">
       <div id="camErrMsg"></div>
@@ -870,6 +877,11 @@ const CAM = (()=>{
   async function takePhoto(){
     if(busy || !stream) return;
     busy=true;
+    const sh = $('#shutter');
+    sh.disabled = true;                       // 두 번 눌리지 않게
+    const fl = $('#flash');
+    fl.classList.add('on');                   // 누른 그 순간 화면이 한 번 번쩍인다
+    setTimeout(()=>fl.classList.remove('on'), 90);
     try{
       const v=$('#camVideo');
       const w=v.videoWidth, h=v.videoHeight;
@@ -885,24 +897,18 @@ const CAM = (()=>{
       toast('사진 '+shots.length+'장');
     }catch(e){ toast('사진을 찍지 못했습니다.'); }
     busy=false;
+    $('#shutter').disabled = false;
   }
 
-  function pickMime(){
-    const list=['video/mp4;codecs=avc1','video/mp4',
-                'video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
-    for(const m of list){
-      if(window.MediaRecorder && MediaRecorder.isTypeSupported &&
-         MediaRecorder.isTypeSupported(m)) return m;
-    }
-    return '';
-  }
+  // 형식을 우리가 고르지 않고 브라우저에 맡긴다.
+  // mp4 를 억지로 시키면 녹화는 되는데 그 브라우저가 못 여는 일이 생긴다.
+  function pickMime(){ return ''; }
 
   function startRec(){
     if(!stream || !window.MediaRecorder){ toast('이 브라우저는 영상 촬영을 지원하지 않습니다.'); return; }
     const mime = pickMime();
     try{
-      rec = mime ? new MediaRecorder(stream,{mimeType:mime, videoBitsPerSecond:8000000})
-                 : new MediaRecorder(stream);
+      rec = new MediaRecorder(stream, {videoBitsPerSecond:8000000});
     }catch(e){ toast('영상 촬영을 시작할 수 없습니다.'); return; }
     recChunks=[];
     rec.ondataavailable = e=>{ if(e.data && e.data.size) recChunks.push(e.data); };
@@ -911,7 +917,8 @@ const CAM = (()=>{
       $('#recChip').classList.remove('on');
       $('#shutter').classList.remove('rec');
       const sec = Math.max(1, Math.round((Date.now()-recStart)/1000));
-      const blob = new Blob(recChunks, {type: rec.mimeType || 'video/webm'});
+      const realType = (rec && rec.mimeType) || (recChunks[0] && recChunks[0].type) || 'video/webm';
+      const blob = new Blob(recChunks, {type: realType});
       recChunks=[];
       if(!blob.size){ toast('영상이 비어 있습니다.'); return; }
       const v=$('#camVideo');
