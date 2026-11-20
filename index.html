@@ -2148,6 +2148,10 @@ document.addEventListener('visibilitychange', ()=>{
 });
 
 /* 뒤로 가기로 창을 닫게 */
+/* 다른 앱이나 창을 보다 돌아오면 다시 맞춘다 */
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) autoSync(false); });
+window.addEventListener('focus', ()=>autoSync(false));
+
 window.addEventListener('popstate', ()=>{
   if($('#cam').classList.contains('on')) CAM.close();
   else if($('#sheet').classList.contains('on')) closeSheet();
@@ -2158,7 +2162,9 @@ window.addEventListener('popstate', ()=>{
 (async function start(){
   initMap();
   await loadRecords();
+  Drive.paint();                           // 단추 글씨를 지금 상태에 맞춘다
   fillMissingAddresses();                  // 주소가 빈 기록을 뒤에서 채운다
+  autoSync(true);                          // 열자마자 조용히 맞춘다
 
   // 첫 화면은 전국을 보여준다. 위치는 조용히 받아 두되 지도를 옮기지는 않는다.
   GPS.start();
@@ -2505,6 +2511,27 @@ $('#btnDrive').onclick = async ()=>{
   }
   driveMenu();
 };
+
+/* 조용히 이어 붙고 바로 맞춘다.
+   앱을 열 때, 그리고 다른 창을 보다 돌아올 때 저절로 돈다.
+   손님이 단추를 찾아 누를 일이 없게 하려는 것이다. */
+let lastAuto = 0;
+async function autoSync(force){
+  try{
+    if(typeof Drive === 'undefined') return;
+    if(!Drive.signedIn()){
+      await Drive.resume();                 // 전에 로그인한 적이 있으면 묻지 않고 이어 붙는다
+      Drive.paint();
+      if(!Drive.signedIn()) return;         // 안 되면 단추가 '맞추기'로 남는다
+    }
+    if(Drive.isBusy()) return;
+    if(!force && Date.now() - lastAuto < 20000) return;   // 너무 자주 두드리지 않는다
+    lastAuto = Date.now();
+    const r = await Drive.sync();
+    Drive.paint();
+    if(r && r.got) toast('새 기록 ' + r.got + '개를 가져왔습니다.', 2600);
+  }catch(e){}
+}
 
 /* 가져오고 올리기를 한 번에 한다 */
 async function runSync(quiet){
