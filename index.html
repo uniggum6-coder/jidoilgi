@@ -52,6 +52,33 @@
   }
   #mapHint b{color:var(--navy);}
 
+  /* 날짜 묶음 머리 */
+  .dayhd{
+    display:flex;align-items:center;gap:8px;margin:14px 12px 4px;padding:9px 11px;
+    background:#fff;border:1px solid var(--line);border-radius:10px;cursor:pointer;
+  }
+  .dayhd:active{background:#faf8f4;}
+  .dayhd .d{font-weight:700;font-size:13.5px;color:var(--navy);white-space:nowrap;}
+  .dayhd .p{font-size:12.5px;color:#6b7876;flex:1;min-width:0;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .dayhd .n{font-size:11.5px;color:#8b9693;white-space:nowrap;}
+  .dayhd .go{font-size:11.5px;color:var(--navy);font-weight:700;white-space:nowrap;}
+
+  /* 하루 동선 띠 */
+  #dayBar{
+    position:absolute;left:10px;right:10px;bottom:10px;z-index:600;
+    background:rgba(255,255,255,.96);border:1px solid var(--line);border-radius:10px;
+    padding:9px 12px;font-size:12.5px;color:#4a5a58;
+    box-shadow:0 2px 10px rgba(0,0,0,.12);display:none;align-items:center;gap:10px;
+  }
+  #dayBar.on{display:flex;}
+  #dayBar .t{font-weight:700;color:var(--navy);white-space:nowrap;}
+  #dayBar .s{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  #dayBar .x{
+    border:1px solid var(--line);background:#fff;border-radius:8px;
+    padding:4px 10px;font-size:12px;color:#4a5a58;white-space:nowrap;
+  }
+
   /* 핀 손보기 띠 */
   #fixBar{
     position:absolute;left:0;right:0;top:0;z-index:950;background:var(--warn);color:#fff;
@@ -387,6 +414,7 @@
     }
     #listPage{z-index:1100;}
     #mapHint{left:420px;right:14px;}
+    #dayBar{left:420px;right:14px;}
   }
 
   /* 지도 단추 */
@@ -425,6 +453,11 @@
   </div>
   <div id="map"></div>
   <div id="mapHint"></div>
+  <div id="dayBar">
+    <span class="t" id="dayBarT"></span>
+    <span class="s" id="dayBarS"></span>
+    <button class="x" id="dayBarX">닫기</button>
+  </div>
 </div>
 
 <div class="page" id="listPage">
@@ -901,14 +934,14 @@ function distM(a, b){
   return 2*R*Math.asin(Math.sqrt(x));
 }
 
-function pinIcon(grade, big, count){
+function pinIcon(grade, big, count, always){
   const col = grade==='g' ? '#1b8a4b' : grade==='w' ? '#c08a0a' : '#c0392b';
   const w = big?36:30, h = big?46:38;
   const n = count||1;
   // 개수는 있는 그대로 보여준다. 자릿수가 늘면 글자만 작게 한다.
   const digits = String(n).length;
   const fs = digits<=2 ? 10 : (digits===3 ? 8 : 6.6);
-  const inner = (n>1)
+  const inner = (n>1 || always)
     ? '<circle cx="15" cy="13.6" r="8" fill="#fff"/>'+
       '<text x="15" y="'+(13.6+fs*0.36)+'" text-anchor="middle" font-size="'+fs+'" '+
       'font-weight="700" font-family="sans-serif" fill="'+col+'">'+n+'</text>'
@@ -1021,25 +1054,111 @@ function showMe(fix){
 }
 
 /* 지도에 기록 핀 찍기 */
+/* ── 날짜로 묶기 ───────────────────────────────────────────────
+   여행이냐 아니냐를 따지지 않는다. 하루는 하루다.
+   ========================================================== */
+function dayKey(ms){
+  const d = new Date(ms);
+  return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+}
+function dayLabel(ms){
+  const d = new Date(ms);
+  const w = ['일','월','화','수','목','금','토'][d.getDay()];
+  return (d.getMonth()+1)+'월 '+d.getDate()+'일 ('+w+')';
+}
+function hhmm(ms){
+  const d = new Date(ms);
+  return pad(d.getHours())+':'+pad(d.getMinutes());
+}
+
+/* 주소에서 고장 이름만 뽑는다. '대전광역시 서구 둔산로 100' → '대전 서구' */
+function placeOf(addr){
+  if(!addr) return '';
+  let t = String(addr).split('(')[0].trim();
+  if(t.indexOf(',') >= 0) return t.split(',')[0].trim();      // 해외 주소
+  const w = t.split(/\s+/);
+  if(w.length < 2) return t.slice(0, 12);
+  const city = w[0].replace(/(특별자치)?(광역시|특별시|특별자치시|자치시|자치도|[도시군])$/, '') || w[0];
+  const gu   = /[구시군읍면동]$/.test(w[1]) ? w[1] : '';
+  return (city + (gu ? ' ' + gu : '')).trim();
+}
+/* 그날 가장 많이 찍은 고장 한두 곳 */
+function dayPlaces(recs){
+  const cnt = {};
+  recs.forEach(r=>{ const pl = placeOf(r.addr); if(pl) cnt[pl] = (cnt[pl]||0)+1; });
+  return Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a]).slice(0,2).join(', ');
+}
+/* 같은 자리(30m)끼리 한 점으로 모은다 */
+function clump(list, m){
+  const out = [];
+  list.forEach(r=>{
+    if(r.lat==null) return;
+    let put = null;
+    for(const g of out){ if(distM(g[0], r) <= (m||30)){ put = g; break; } }
+    if(put) put.push(r); else out.push([r]);
+  });
+  out.forEach(g=>g.sort((a,b)=>a.createdAt-b.createdAt));
+  return out;
+}
+
+/* 하루 동선 — 그 날짜를 눌렀을 때만 그린다 */
+let dayLayer = null;
+function clearDay(){
+  if(dayLayer && map){ map.removeLayer(dayLayer); }
+  dayLayer = null;
+  const b = $('#dayBar'); if(b) b.classList.remove('on');
+}
+function showDay(recs){
+  const pts = recs.filter(r=>r.lat!=null).sort((a,b)=>a.createdAt-b.createdAt);
+  if(!pts.length){ toast('이 날은 위치가 있는 기록이 없습니다.'); return; }
+
+  goMap();
+  clearDay();
+  if(markerLayer) markerLayer.clearLayers();
+  dayLayer = L.layerGroup().addTo(map);
+
+  const stops = clump(pts, 30);
+  stops.sort((a,b)=>a[0].createdAt - b[0].createdAt);     // 찍은 순서대로
+
+  const line = [];
+  stops.forEach((g, i)=>{
+    const head = g[0];
+    line.push([head.lat, head.lng]);
+    const mk = L.marker([head.lat, head.lng],
+                        {icon: pinIcon(accGrade(head.acc), false, i+1, true)});
+    mk.on('click', ()=>{ g.length===1 ? openRec(head.id) : openGroup(g); });
+    dayLayer.addLayer(mk);
+  });
+  if(line.length > 1){
+    dayLayer.addLayer(L.polyline(line, {color:'#14323f', weight:3, opacity:.8}));
+  }
+
+  let far = 0;
+  for(let i=1;i<line.length;i++){
+    far += distM({lat:line[i-1][0], lng:line[i-1][1]}, {lat:line[i][0], lng:line[i][1]});
+  }
+  const km = far >= 1000 ? (far/1000).toFixed(far>=10000?0:1)+'km' : Math.round(far)+'m';
+  const t0 = pts[0].createdAt, t1 = pts[pts.length-1].createdAt;
+  $('#dayBarT').textContent = dayLabel(t0);
+  $('#dayBarS').textContent = stops.length+'곳' + (line.length>1 ? ' · '+km : '') +
+                              ' · ' + hhmm(t0) + (hhmm(t0)!==hhmm(t1) ? '~'+hhmm(t1) : '');
+  $('#dayBar').classList.add('on');
+  $('#mapHint').style.display = 'none';
+
+  setTimeout(()=>{
+    map.invalidateSize();
+    map.fitBounds(L.latLngBounds(line), {padding:[46,46], maxZoom:17});
+  }, 140);
+}
+
 function drawPins(list){
   if(!markerLayer) return;
+  clearDay();                       // 보통 지도로 돌아온다
   markerLayer.clearLayers();
 
   // 가까운 자리의 기록은 한 핀으로 묶는다. 좌표를 반올림하지 않고 실제 거리로 잰다.
   // GPS 는 같은 자리에서도 몇 미터씩 흔들려서, 반올림으로 묶으면 자꾸 갈라진다.
-  const GROUP_M = 30;
-  const groups = [];
-  list.forEach(r=>{
-    if(r.lat==null) return;
-    let put = null;
-    for(const g of groups){
-      if(distM(g[0], r) <= GROUP_M){ put = g; break; }
-    }
-    if(put) put.push(r); else groups.push([r]);
-  });
-
-  groups.forEach(g=>{
-    g.sort((a,b)=>a.createdAt-b.createdAt);     // 찍은 순서대로
+  clump(list, 30).forEach(g=>{
     const head = g[0];
     const m = L.marker([head.lat,head.lng],
                        {icon:pinIcon(accGrade(head.acc), false, g.length)});
@@ -1580,7 +1699,33 @@ function renderList(){
     box.appendChild(e);
     drawPins([]); return;
   }
+  // 날짜로 묶는다 (목록은 최근 것부터이므로 순서는 그대로 따라간다)
+  const days = [];
+  const seen = {};
   list.forEach(r=>{
+    const k = dayKey(r.createdAt);
+    if(seen[k]==null){ seen[k] = days.length; days.push({key:k, recs:[]}); }
+    days[seen[k]].recs.push(r);
+  });
+
+  days.forEach(d=>{
+    const h = el('div','dayhd');
+    const n = d.recs.reduce((t,r)=>t + ((r.media||[]).length||0), 0);
+    const e1 = el('span','d');  e1.textContent = dayLabel(d.recs[0].createdAt);
+    const e2 = el('span','p');  e2.textContent = dayPlaces(d.recs);
+    const e3 = el('span','n');  e3.textContent = n + '장';
+    const e4 = el('span','go'); e4.textContent = '동선 ›';
+    h.appendChild(e1); h.appendChild(e2); h.appendChild(e3); h.appendChild(e4);
+    h.onclick = ()=>showDay(d.recs);
+    box.appendChild(h);
+    d.recs.forEach(r=>renderCard(r, box));
+  });
+  drawPins(list);
+}
+
+/* 기록 한 줄 */
+function renderCard(r, box){
+  {
     const c = el('div','card');
     const tb = el('div','thbox');
     const m0 = (r.media||[])[0];
@@ -1611,8 +1756,7 @@ function renderList(){
     c.appendChild(delBtn(r));
     c.onclick = ()=>openRec(r.id);
     box.appendChild(c);
-  });
-  drawPins(list);
+  }
 }
 
 /* ── 기록 크게 보기 ────────────────────────────────────────────── */
@@ -2120,6 +2264,7 @@ $('#camClose').onclick = async ()=>{
   if(CAM.isRec()){ CAM.stopRec(); return; }
   CAM.close();
 };
+$('#dayBarX').onclick = ()=>{ clearDay(); drawPins(filtered()); };
 $('#camErrBtn').onclick = ()=>CAM.close();
 $('#mPhoto').onclick = ()=>CAM.setMode('photo');
 $('#mVideo').onclick = ()=>CAM.setMode('video');
