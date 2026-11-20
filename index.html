@@ -1778,18 +1778,7 @@ function goList(){
 async function loadRecords(){
   try{ records = await DB.all(); }
   catch(e){ records = []; toast('저장된 기록을 읽지 못했습니다.'); }
-  let sub = records.length ? records.length+'개' : '';
-  try{
-    if(navigator.storage && navigator.storage.estimate){
-      const q = await navigator.storage.estimate();
-      if(q && q.quota){
-        const usedMB  = q.usage/1048576;
-        const quotaMB = q.quota/1048576;
-        sub += (sub?' · ':'') + usedMB.toFixed(0)+'/'+quotaMB.toFixed(0)+'MB';
-      }
-    }
-  }catch(e){}
-  $('#hdrSub').textContent = sub;
+  $('#hdrSub').textContent = '';     // 머리말에는 아무것도 안 적는다
   renderList();
 }
 
