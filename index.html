@@ -552,6 +552,19 @@ const DB = (()=>{
   function tx(mode){
     return open().then(d=>d.transaction(STORE, mode).objectStore(STORE));
   }
+  // 쓰기는 거래(transaction)가 끝까지 마쳐야 진짜 저장이다.
+  // 요청이 받아들여진 것만 보고 성공이라 하면, 공간이 모자라 되돌려져도 모른다.
+  function write(fn){
+    return open().then(d=>new Promise((res,rej)=>{
+      const t = d.transaction(STORE,'readwrite');
+      const st = t.objectStore(STORE);
+      let out = null, failed = null;
+      try{ out = fn(st); }catch(e){ rej(e); return; }
+      t.oncomplete = ()=>{ failed ? rej(failed) : res(out); };
+      t.onabort = ()=>rej(t.error || failed || new Error('저장이 되돌려졌습니다'));
+      t.onerror = ()=>rej(t.error || failed || new Error('저장에 실패했습니다'));
+    }));
+  }
   return {
     all(){
       return tx('readonly').then(s=>new Promise((res,rej)=>{
@@ -567,16 +580,10 @@ const DB = (()=>{
       }));
     },
     put(rec){
-      return tx('readwrite').then(s=>new Promise((res,rej)=>{
-        const r = s.put(rec);
-        r.onsuccess=()=>res(rec); r.onerror=()=>rej(r.error);
-      }));
+      return write(st=>{ st.put(rec); return rec; });
     },
     del(id){
-      return tx('readwrite').then(s=>new Promise((res,rej)=>{
-        const r = s.delete(id);
-        r.onsuccess=()=>res(true); r.onerror=()=>rej(r.error);
-      }));
+      return write(st=>{ st.delete(id); return true; });
     }
   };
 })();
@@ -987,7 +994,7 @@ const CAM = (()=>{
       shots.push({type:'photo', blob:got.blob, size:got.blob.size, thumb,
                   thumbUrl:URL.createObjectURL(thumb), w:got.w, h:got.h, fix});
       paintShots();
-      toast('사진 '+shots.length+'장 · '+got.w+'×'+got.h+' ('+mb(got.blob.size)+')');
+      toast('사진 '+shots.length+'장');
     }catch(e){
       toast('사진을 찍지 못했습니다: '+(e && e.message ? e.message : ''), 3600);
     }finally{
@@ -1114,6 +1121,8 @@ const CAM = (()=>{
       })));
       if(!recObj.media.length) throw new Error('담긴 사진·영상이 없습니다');
       await DB.put(recObj);
+      const check = await DB.get(recObj.id);          // 정말 들어갔는지 눈으로 확인
+      if(!check) throw new Error('저장이 되돌려졌습니다');
       shots.forEach(s=>{ if(s.thumbUrl) URL.revokeObjectURL(s.thumbUrl); });
       shots=[]; paintShots();
       await loadRecords();
