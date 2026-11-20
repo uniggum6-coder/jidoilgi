@@ -898,7 +898,7 @@ const CAM = (()=>{
   }
 
   async function open(){
-    shots=[]; paintShots();
+    shots=[]; liveRecId=null; paintShots();
     $('#cam').classList.add('on');
     $('#camErr').classList.remove('on');
     GPS.reset(); GPS.start(); GPS.on(gpsPaint); gpsPaint(GPS.current());
@@ -918,6 +918,7 @@ const CAM = (()=>{
     clearInterval(recTimer); recTimer=null;
     $('#recChip').classList.remove('on');
     stopStream(); GPS.off(gpsPaint);
+    liveRecId = null;                        // 닫으면 묶음이 끝난다
     $('#cam').classList.remove('on');
     shots.forEach(s=>{ if(s.thumbUrl) URL.revokeObjectURL(s.thumbUrl); });
     shots=[];
@@ -1066,10 +1067,60 @@ const CAM = (()=>{
     $('#shutter').classList.remove('rec');
   }
 
-  /* 찍는 즉시 기록 하나로 저장한다 */
+  /* 찍는 즉시 저장한다.
+     촬영 화면을 열어 둔 채 같은 자리에서 더 찍으면, 새 기록을 만들지 않고
+     아까 만든 기록에 이어 붙인다. 닫았다 다시 열면 새 기록이 시작된다. */
+  let liveRecId = null;
+
+  function metersBetween(a, b){
+    if(!a || !b) return Infinity;
+    const R = 6371000, toRad = d=>d*Math.PI/180;
+    const dLat = toRad(b.lat-a.lat), dLng = toRad(b.lng-a.lng);
+    const la1 = toRad(a.lat), la2 = toRad(b.lat);
+    const x = Math.sin(dLat/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(dLng/2)**2;
+    return 2*R*Math.asin(Math.sqrt(x));
+  }
+
+  async function addToLive(shot, fix){
+    if(!liveRecId) return false;
+    const rec = await DB.get(liveRecId);
+    if(!rec) { liveRecId = null; return false; }
+    // 자리를 옮겼으면 새 기록으로 (50m 넘게)
+    if(fix && rec.lat!=null && metersBetween({lat:rec.lat,lng:rec.lng}, fix) > 50) return false;
+    rec.media.push({
+      type: shot.type,
+      mime: (shot.mime || (shot.blob && shot.blob.type) || ''),
+      size: shot.size,
+      dur:  (shot.dur||null),
+      buf:      await shot.blob.arrayBuffer(),
+      thumbBuf: shot.thumb ? await shot.thumb.arrayBuffer() : null
+    });
+    // 더 정확한 위치를 받았으면 바꿔 끼운다
+    if(fix && (rec.acc==null || fix.acc < rec.acc)){
+      rec.lat=fix.lat; rec.lng=fix.lng; rec.acc=fix.acc;
+      rec.alt=fix.alt; rec.altAcc=fix.altAcc; rec.heading=fix.heading;
+    }
+    await DB.put(rec);
+    const check = await DB.get(rec.id);
+    if(!check) throw new Error('저장이 되돌려졌습니다');
+    shot.recId = rec.id;
+    await loadRecords();
+    toast('이 자리 기록에 더했습니다 (' + rec.media.length + '개)', 2200);
+    return true;
+  }
+
   async function saveShot(shot){
     let fix = shot.fix;
     if(!fix){ fix = await GPS.once(7000); }
+
+    // 먼저 이어 붙일 수 있으면 붙인다
+    try{
+      if(await addToLive(shot, fix)) return true;
+    }catch(e){
+      toast('저장하지 못했습니다: '+((e&&(e.name||e.message))||''), 5000);
+      return false;
+    }
+
     const now = Date.now();
     const rec = {
       id: 'r'+now+'_'+Math.random().toString(36).slice(2,7),
@@ -1097,9 +1148,9 @@ const CAM = (()=>{
       const check = await DB.get(rec.id);
       if(!check) throw new Error('저장이 되돌려졌습니다');
       shot.recId = rec.id;
+      liveRecId = rec.id;                   // 이 자리에서 더 찍으면 여기에 붙인다
       await loadRecords();
-      toast(shot.type==='video' ? '영상을 저장했습니다. 메모는 기록을 눌러 적으시면 됩니다.'
-                                : '사진을 저장했습니다. 메모는 기록을 눌러 적으시면 됩니다.', 2600);
+      toast('저장했습니다. 메모는 기록을 눌러 적으시면 됩니다.', 2600);
       return true;
     }catch(e){
       const nm = (e && (e.name||'')) + '';
