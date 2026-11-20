@@ -783,11 +783,16 @@ const CAM = (()=>{
 
   async function startStream(){
     stopStream();
-    const want = {
-      video:{ facingMode:{ideal:'environment'},
-              width:{ideal:3840}, height:{ideal:2160} },
-      audio: (mode==='video')
-    };
+    // 사진은 가장 높은 해상도로, 영상은 1080p 로 받는다.
+    // 영상까지 4K 로 받으면 폰이 눌러 담는 속도를 못 따라가 미리보기가 끊긴다.
+    const want = (mode==='video')
+      ? { video:{ facingMode:{ideal:'environment'},
+                  width:{ideal:1920}, height:{ideal:1080},
+                  frameRate:{ideal:30, max:30} },
+          audio:true }
+      : { video:{ facingMode:{ideal:'environment'},
+                  width:{ideal:3840}, height:{ideal:2160} },
+          audio:false };
     try{
       stream = await navigator.mediaDevices.getUserMedia(want);
     }catch(e){
@@ -896,7 +901,7 @@ const CAM = (()=>{
     if(!stream || !window.MediaRecorder){ toast('이 브라우저는 영상 촬영을 지원하지 않습니다.'); return; }
     const mime = pickMime();
     try{
-      rec = mime ? new MediaRecorder(stream,{mimeType:mime, videoBitsPerSecond:12000000})
+      rec = mime ? new MediaRecorder(stream,{mimeType:mime, videoBitsPerSecond:8000000})
                  : new MediaRecorder(stream);
     }catch(e){ toast('영상 촬영을 시작할 수 없습니다.'); return; }
     recChunks=[];
