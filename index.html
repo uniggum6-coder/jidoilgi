@@ -381,8 +381,10 @@
     #nav{
       left:0;right:auto;width:400px;border-right:1px solid var(--line);
     }
-    /* 지도 확대 단추가 왼쪽 칸에 가리지 않게 오른쪽으로 밀어둔다 */
-    .leaflet-top.leaflet-left{left:408px;}
+    /* 지도 확대 단추는 오른쪽 아래로 내린다 (왼쪽 칸에 가리지 않게) */
+    .leaflet-top.leaflet-left{
+      top:auto;left:auto;bottom:30px;right:12px;
+    }
     #listPage{z-index:1100;}
     #mapHint{left:420px;right:14px;}
   }
