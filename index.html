@@ -406,7 +406,7 @@
       <button id="mVideo">영상</button>
     </div>
     <button id="shutter" aria-label="촬영"></button>
-    <button id="camDone">저장</button>
+    <button id="camDone" class="on">닫기</button>
   </div>
 </div>
 
@@ -932,12 +932,17 @@ const CAM = (()=>{
       if(s.type==='video'){
         const b=el('div','vb'); b.textContent=dur(s.dur); w.appendChild(b);
       }
-      const x=el('button','x'); x.textContent='✕';
-      x.onclick=()=>{ URL.revokeObjectURL(s.thumbUrl); shots.splice(i,1); paintShots(); };
-      w.appendChild(x);
+      if(s.recId){
+        w.title='메모 적기';
+        w.onclick=()=>{ close(); openRec(s.recId); };
+        const mk=el('div','vb');
+        mk.textContent='메모';
+        mk.style.cssText='left:auto;right:2px;top:2px;bottom:auto;background:rgba(31,111,107,.92);';
+        w.appendChild(mk);
+      }
       box.appendChild(w);
     });
-    $('#camDone').classList.toggle('on', shots.length>0);
+    $('#camDone').classList.add('on');
   }
 
   function makeThumb(srcEl, w, h){
@@ -991,10 +996,12 @@ const CAM = (()=>{
       if(!thumb){ toast('사진이 담기지 않았습니다. 한 번 더 눌러 주십시오.', 3000); return; }
 
       const fix = GPS.current();
-      shots.push({type:'photo', blob:got.blob, size:got.blob.size, thumb,
-                  thumbUrl:URL.createObjectURL(thumb), w:got.w, h:got.h, fix});
+      const shot = {type:'photo', blob:got.blob, size:got.blob.size, thumb,
+                    thumbUrl:URL.createObjectURL(thumb), w:got.w, h:got.h, fix};
+      shots.push(shot);
       paintShots();
-      toast('사진 '+shots.length+'장');
+      await saveShot(shot);          // 찍는 즉시 저장
+      paintShots();
     }catch(e){
       toast('사진을 찍지 못했습니다: '+(e && e.message ? e.message : ''), 3600);
     }finally{
@@ -1027,11 +1034,13 @@ const CAM = (()=>{
       const v=$('#camVideo');
       const thumb = await makeThumb(v, v.videoWidth||640, v.videoHeight||480);
       const fix = GPS.current();
-      shots.push({type:'video', blob, size:blob.size, thumb,
-                  thumbUrl:URL.createObjectURL(thumb), dur:sec,
-                  mime: blob.type, fix});
+      const shot = {type:'video', blob, size:blob.size, thumb,
+                    thumbUrl:URL.createObjectURL(thumb), dur:sec,
+                    mime: blob.type, fix};
+      shots.push(shot);
       paintShots();
-      toast('영상 '+dur(sec)+' ('+mb(blob.size)+')');
+      await saveShot(shot);          // 찍는 즉시 저장
+      paintShots();
     };
     rec.start(1000);
     recStart = Date.now();
@@ -1055,6 +1064,56 @@ const CAM = (()=>{
     $('#mPhoto').classList.toggle('on', m==='photo');
     $('#mVideo').classList.toggle('on', m==='video');
     $('#shutter').classList.remove('rec');
+  }
+
+  /* 찍는 즉시 기록 하나로 저장한다 */
+  async function saveShot(shot){
+    let fix = shot.fix;
+    if(!fix){ fix = await GPS.once(7000); }
+    const now = Date.now();
+    const rec = {
+      id: 'r'+now+'_'+Math.random().toString(36).slice(2,7),
+      createdAt: now,
+      lat: fix? fix.lat : null,
+      lng: fix? fix.lng : null,
+      acc: fix? fix.acc : null,
+      alt: fix? fix.alt : null,
+      altAcc: fix? fix.altAcc : null,
+      heading: fix? fix.heading : null,
+      origLat:null, origLng:null, moved:false,
+      memo: '',
+      media: []
+    };
+    try{
+      rec.media = [{
+        type: shot.type,
+        mime: (shot.mime || (shot.blob && shot.blob.type) || ''),
+        size: shot.size,
+        dur:  (shot.dur||null),
+        buf:      await shot.blob.arrayBuffer(),
+        thumbBuf: shot.thumb ? await shot.thumb.arrayBuffer() : null
+      }];
+      await DB.put(rec);
+      const check = await DB.get(rec.id);
+      if(!check) throw new Error('저장이 되돌려졌습니다');
+      shot.recId = rec.id;
+      await loadRecords();
+      toast(shot.type==='video' ? '영상을 저장했습니다. 메모는 기록을 눌러 적으시면 됩니다.'
+                                : '사진을 저장했습니다. 메모는 기록을 눌러 적으시면 됩니다.', 2600);
+      return true;
+    }catch(e){
+      const nm = (e && (e.name||'')) + '';
+      if(nm.indexOf('Quota')>=0 || nm.indexOf('QUOTA')>=0){
+        await dialog({
+          title:'폰 저장 공간이 찼습니다',
+          text:'이 브라우저가 쓸 수 있는 공간을 다 썼습니다. 기록을 내려받아 보관하신 뒤, 오래된 기록을 지우면 다시 저장됩니다.',
+          yes:'알겠습니다', noHide:true
+        });
+      } else {
+        toast('저장하지 못했습니다: '+((e&&(e.name||e.message))||''), 5000);
+      }
+      return false;
+    }
   }
 
   async function save(){
@@ -1582,7 +1641,7 @@ $('#shutter').onclick = ()=>{
   if(CAM.mode()==='photo') CAM.takePhoto();
   else { if(CAM.isRec()) CAM.stopRec(); else CAM.startRec(); }
 };
-$('#camDone').onclick = ()=>CAM.save();
+$('#camDone').onclick = ()=>CAM.close();
 $('#sheetClose').onclick = closeSheet;
 $('#sheet').onclick = e=>{ if(e.target.id==='sheet') closeSheet(); };
 $('#btnExport').onclick = doExport;
