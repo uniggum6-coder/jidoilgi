@@ -2059,13 +2059,16 @@ const Drive = (()=>{
   function paint(){
     const b = $('#btnDrive');
     if(!b) return;
-    b.textContent = signedIn() ? '드라이브' : '로그인';
+    let linked = false;
+    try{ linked = !!localStorage.getItem('jd_linked'); }catch(e){}
+    b.textContent = signedIn() ? '드라이브' : (linked ? '맞추기' : '로그인');
     const el2 = document.querySelector('#hdr .me');
     if(el2) el2.textContent = signedIn() ? (me||'') : '';
   }
 
   async function signIn(){
-    await getToken('consent');
+    try{ await getToken(''); }          // 전에 허용했으면 조용히 지나간다
+    catch(e){ await getToken('consent'); }
     try{
       const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {headers:hdr()});
       if(r.ok){ const u = await r.json(); me = u.email || u.name || ''; }
@@ -2124,8 +2127,8 @@ $('#btnDrive').onclick = async ()=>{
   if(!Drive.signedIn()){
     try{
       await Drive.signIn();
-      toast('로그인했습니다. 기록을 맞추는 중입니다…', 2600);
-      await runSync(true);
+      toast('기록을 맞추는 중입니다…', 2400);
+      await runSync(false);
     }catch(e){ toast(e.message || '로그인하지 못했습니다.', 3600); }
     return;
   }
