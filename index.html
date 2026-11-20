@@ -793,6 +793,55 @@ function addressOf(lat, lng){
   });
 }
 
+/* 주소 글귀 한 줄로 */
+function addrText(a){
+  if(!a) return '';
+  return a.road ? (a.road + (a.jibun ? '  ('+a.jibun+')' : '')) : (a.jibun||'');
+}
+
+/* 카카오가 채비될 때까지 기다린다 (길어야 12초) */
+function whenKakao(){
+  return new Promise(res=>{
+    if(kakaoReady) return res(true);
+    let n = 0;
+    const t = setInterval(()=>{
+      if(kakaoReady || ++n > 60){ clearInterval(t); res(kakaoReady); }
+    }, 200);
+  });
+}
+
+/* 기록 하나에 주소를 받아 넣는다. 넣었으면 true */
+async function stampAddr(rec){
+  if(!rec || rec.lat == null || rec.addr) return false;
+  if(!(await whenKakao())) return false;
+  const txt = addrText(await addressOf(rec.lat, rec.lng));
+  if(!txt) return false;
+  const now = await DB.get(rec.id);          // 그사이 바뀌었거나 지워졌을 수 있다
+  if(!now || now.addr) return false;
+  now.addr = txt;
+  await DB.put(now, true);                   // 손님이 고친 게 아니므로 시각은 그대로
+  rec.addr = txt;
+  return true;
+}
+
+/* 주소가 비어 있는 기록을 조용히 메운다 (전파가 없던 자리, 옛 기록) */
+let addrFilling = false;
+async function fillMissingAddresses(){
+  if(addrFilling) return;
+  addrFilling = true;
+  try{
+    if(!(await whenKakao())) return;
+    const list = (await DB.all()).filter(r=>r.lat!=null && !r.addr);
+    let did = 0;
+    for(const r of list){
+      if(await stampAddr(r)) did++;
+      await new Promise(s=>setTimeout(s, 350));   // 카카오를 몰아치지 않는다
+    }
+    if(did) await loadRecords();
+  }catch(e){}
+  finally{ addrFilling = false; }
+}
+
 /* ── 지도 ──────────────────────────────────────────────────────── */
 let map, markerLayer, meMarker, fixMarker=null, fixRec=null;
 
@@ -1353,6 +1402,7 @@ const CAM = (()=>{
       shot.recId = rec.id;
       liveRecId = rec.id;                   // 이 자리에서 더 찍으면 여기에 붙인다
       await loadRecords();
+      stampAddr(rec).then(ok=>{ if(ok) loadRecords(); });   // 주소는 찍은 자리에서 바로
       toast('저장했습니다. 메모는 기록을 눌러 적으시면 됩니다.', 2600);
       autoPush(rec.id);
       return true;
@@ -1661,17 +1711,14 @@ async function openRec(id){
     s1.appendChild(kv('좌표', r.lat.toFixed(6)+', '+r.lng.toFixed(6)));
     s1.appendChild(kv('오차', '<span class="acc '+accGrade(r.acc)+'">'+accText(r.acc)+'</span>'));
     if(!r.addr){
-      addressOf(r.lat, r.lng).then(async a=>{
-        if(!a) {
-          const v = addrRow.querySelector('.v');
-          if(v) v.innerHTML = '<span style="color:#a8b2b0">주소를 찾지 못했습니다</span>';
-          return;
-        }
-        const txt = a.road ? (a.road + (a.jibun ? '  ('+a.jibun+')' : '')) : a.jibun;
-        r.addr = txt;
-        try{ await DB.put(r); await loadRecords(); }catch(e){}
+      stampAddr(r).then(async ok=>{
         const v = addrRow.querySelector('.v');
-        if(v) v.textContent = txt;
+        if(ok){
+          if(v) v.textContent = r.addr;
+          await loadRecords();
+        } else if(v){
+          v.innerHTML = '<span style="color:#a8b2b0">주소를 찾지 못했습니다</span>';
+        }
       });
     }
     if(r.moved && r.origLat!=null){
@@ -1885,9 +1932,11 @@ async function saveFix(){
   if(fixRec.origLat==null){ fixRec.origLat = fixRec.lat; fixRec.origLng = fixRec.lng; }
   fixRec.lat = c.lat; fixRec.lng = c.lng; fixRec.moved = true;
   fixRec.addr = '';                        // 자리를 옮겼으니 주소는 다시 받는다
+  const moved = fixRec;
   await DB.put(fixRec);
   await loadRecords();
   pushEdit();
+  stampAddr(moved).then(ok=>{ if(ok) loadRecords(); });
   endFix();
   toast('위치를 고쳤습니다. 원래 좌표도 함께 남겨 두었습니다.', 3000);
 }
@@ -2079,6 +2128,7 @@ window.addEventListener('popstate', ()=>{
 (async function start(){
   initMap();
   await loadRecords();
+  fillMissingAddresses();                  // 주소가 빈 기록을 뒤에서 채운다
 
   // 첫 화면은 전국을 보여준다. 위치는 조용히 받아 두되 지도를 옮기지는 않는다.
   GPS.start();
