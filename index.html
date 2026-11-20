@@ -1702,6 +1702,15 @@ async function saveToPhone(r, i){
     if(e && e.name === 'AbortError') return;      // 손님이 그만둔 것
   }
 
+  // 카카오톡·인스타 같은 앱 안의 작은 브라우저는 저장을 제대로 못 한다.
+  // 거기서 내려받기를 걸면 쓸데없는 안내창만 뜨므로 아예 걸지 않는다.
+  const ua = navigator.userAgent || '';
+  const inApp = /KAKAOTALK|NAVER\(inapp|Instagram|FBAN|FBAV|Line\//i.test(ua);
+  if(inApp){
+    toast('이 화면에서는 저장이 되지 않습니다. 아래 ⋮ 를 눌러 "다른 브라우저로 열기"로 여신 뒤 저장해 주십시오.', 5200);
+    return;
+  }
+
   // 그 밖에는 그냥 내려받는다
   try{
     const u = URL.createObjectURL(b);
