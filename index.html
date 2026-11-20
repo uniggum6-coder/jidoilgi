@@ -143,6 +143,10 @@
   .acc.g{background:#e4f3ea;color:var(--good);}
   .acc.w{background:#fbf2dd;color:var(--warn);}
   .acc.b{background:#fbe6e3;color:var(--bad);}
+  .up{font-size:11px;font-weight:700;padding:1px 6px;border-radius:9px;
+      background:#e8eff2;color:#2a6072;white-space:nowrap;}
+  #hdr .me{font-size:11.5px;opacity:.8;max-width:92px;overflow:hidden;
+           text-overflow:ellipsis;white-space:nowrap;}
   .empty{padding:48px 28px;text-align:center;color:#99a4a2;font-size:14px;}
   .empty .big{font-size:34px;margin-bottom:10px;}
 
@@ -362,7 +366,9 @@
 <div id="hdr">
   <h1>지도일기</h1>
   <span class="sub" id="hdrSub"></span>
+  <span class="me"></span>
   <span class="sp"></span>
+  <button class="hbtn" id="btnDrive">로그인</button>
   <button class="hbtn" id="btnExport">내려받기</button>
 </div>
 
@@ -445,6 +451,7 @@
 
 <div id="toast"></div>
 
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -1128,7 +1135,27 @@ const CAM = (()=>{
     shot.recId = rec.id;
     await loadRecords();
     toast('이 자리 기록에 더했습니다 (' + rec.media.length + '개)', 2200);
+    autoPush(rec.id);
     return true;
+  }
+
+  // 사진만 들어 있는 기록은 로그인돼 있으면 조용히 올린다.
+  // 영상은 용량이 커서 손님이 고를 때만 올린다.
+  function autoPush(id){
+    try{
+      if(typeof Drive==='undefined' || !Drive.signedIn()) return;
+      setTimeout(async ()=>{
+        try{
+          const r = await DB.get(id);
+          if(!r || !r.media || !r.media.length) return;
+          if(r.media.some(m=>m.type==='video')) return;
+          if(r.media.every(m=>m.driveId)) return;
+          await Drive.pushRecord(r);
+          await Drive.writeIndex();
+          await loadRecords();
+        }catch(e){}
+      }, 400);
+    }catch(e){}
   }
 
   async function saveShot(shot){
@@ -1173,6 +1200,7 @@ const CAM = (()=>{
       liveRecId = rec.id;                   // 이 자리에서 더 찍으면 여기에 붙인다
       await loadRecords();
       toast('저장했습니다. 메모는 기록을 눌러 적으시면 됩니다.', 2600);
+      autoPush(rec.id);
       return true;
     }catch(e){
       const nm = (e && (e.name||'')) + '';
@@ -1340,6 +1368,9 @@ function renderList(){
     const a = el('span','acc '+accGrade(r.acc)); a.textContent = accText(r.acc);
     me.appendChild(a);
     if(r.moved){ const s=el('span'); s.textContent='위치 손봄'; me.appendChild(s); }
+    if((r.media||[]).length && r.media.every(m=>m.driveId)){
+      const u=el('span','up'); u.textContent='드라이브'; me.appendChild(u);
+    }
     if(vids){ const s=el('span'); s.textContent='영상 '+vids+'개'; me.appendChild(s); }
     bd.appendChild(me);
     c.appendChild(bd);
@@ -1373,7 +1404,20 @@ async function openRec(id){
       cur = i;
       wrap.innerHTML='';
       const m = media[i];
-      const b = mediaBlob(m);
+      let b = mediaBlob(m);
+      if((!b || !b.size) && m.driveId){
+        const p=el('div');
+        p.style.cssText='color:#bbb;padding:26px 18px;font-size:13.5px;text-align:center;';
+        p.textContent='드라이브에서 받는 중…';
+        wrap.appendChild(p);
+        if(typeof Drive!=='undefined' && Drive.signedIn()){
+          Drive.fetchMedia(r, i).then(()=>{ if(cur===i) show(i); })
+               .catch(()=>{ p.textContent='드라이브에서 받지 못했습니다.'; });
+        } else {
+          p.textContent='이 사진은 드라이브에 있습니다. 로그인하면 볼 수 있습니다.';
+        }
+        return;
+      }
       if(!b || !b.size){
         const p=el('div');
         p.style.cssText='color:#bbb;padding:26px 18px;font-size:13.5px;line-height:1.6;text-align:center;';
@@ -1825,5 +1869,282 @@ window.addEventListener('popstate', ()=>{
   }
 })();
 </script>
+
+<script>
+/* ======================================================================
+   구글 로그인 + 내 드라이브에 올리기
+   - 서버가 없다. 사진·영상·목록이 전부 사용자 자기 드라이브에 들어간다.
+   - 권한은 drive.file 하나뿐: 이 앱이 만든 파일만 다룬다.
+   ====================================================================== */
+const GCLIENT_ID = '541026371687-lpvde8mc2elghdudpje7p2598dv837ah.apps.googleusercontent.com';
+const GSCOPE     = 'https://www.googleapis.com/auth/drive.file';
+const FOLDER     = '지도일기';
+const INDEX_FILE = '기록목록.json';
+
+const Drive = (()=>{
+  let token = null, tokenAt = 0, tc = null;
+  let folderId = null, indexId = null;
+  let me = (()=>{ try{ return localStorage.getItem('jd_me')||''; }catch(e){ return ''; } })();
+  let busy = false;
+
+  function signedIn(){ return !!token && (Date.now()-tokenAt) < 50*60*1000; }
+  function hdr(){ return {Authorization:'Bearer '+token}; }
+
+  function getToken(prompt){
+    return new Promise((res,rej)=>{
+      if(!window.google || !google.accounts || !google.accounts.oauth2)
+        return rej(new Error('구글 로그인 준비가 아직 안 됐습니다. 잠시 뒤 다시 눌러 주십시오.'));
+      if(!tc){
+        tc = google.accounts.oauth2.initTokenClient({
+          client_id: GCLIENT_ID, scope: GSCOPE,
+          callback: r=>{
+            if(r && r.access_token){ token=r.access_token; tokenAt=Date.now(); tc._ok&&tc._ok(); }
+            else { tc._no&&tc._no(new Error('로그인이 취소되었습니다.')); }
+          },
+          error_callback: e=>{ tc._no&&tc._no(new Error('로그인이 취소되었습니다.')); }
+        });
+      }
+      tc._ok = ()=>res(token); tc._no = rej;
+      tc.requestAccessToken({prompt: prompt||''});
+    });
+  }
+
+  async function api(url, opt){
+    const o = Object.assign({}, opt||{});
+    o.headers = Object.assign({}, o.headers||{}, hdr());
+    let r = await fetch(url, o);
+    if(r.status===401){                       // 표가 만료되면 조용히 새로 받는다
+      await getToken('');
+      o.headers = Object.assign({}, o.headers||{}, hdr());
+      r = await fetch(url, o);
+    }
+    if(!r.ok) throw new Error('드라이브 오류 '+r.status);
+    return r;
+  }
+
+  async function ensureFolder(){
+    if(folderId) return folderId;
+    const q = encodeURIComponent(
+      "name='"+FOLDER+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+    const r = await api('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,name)');
+    const j = await r.json();
+    if(j.files && j.files.length){ folderId = j.files[0].id; return folderId; }
+    const c = await api('https://www.googleapis.com/drive/v3/files', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({name:FOLDER, mimeType:'application/vnd.google-apps.folder'})
+    });
+    folderId = (await c.json()).id;
+    return folderId;
+  }
+
+  async function uploadBlob(blob, name, mime){
+    const fid = await ensureFolder();
+    const meta = {name, parents:[fid]};
+    const b = new Blob([
+      '--jd\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n',
+      JSON.stringify(meta),
+      '\r\n--jd\r\nContent-Type: '+(mime||'application/octet-stream')+'\r\n\r\n',
+      blob, '\r\n--jd--'
+    ], {type:'multipart/related; boundary=jd'});
+    const r = await api(
+      'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',
+      {method:'POST', headers:{'Content-Type':'multipart/related; boundary=jd'}, body:b});
+    return (await r.json()).id;
+  }
+
+  async function overwriteBlob(id, blob, mime){
+    const r = await api(
+      'https://www.googleapis.com/upload/drive/v3/files/'+id+'?uploadType=media&fields=id',
+      {method:'PATCH', headers:{'Content-Type':mime||'application/octet-stream'}, body:blob});
+    return (await r.json()).id;
+  }
+
+  async function download(id){
+    const r = await api('https://www.googleapis.com/drive/v3/files/'+id+'?alt=media');
+    return await r.blob();
+  }
+
+  async function findIndex(){
+    if(indexId) return indexId;
+    const fid = await ensureFolder();
+    const q = encodeURIComponent("name='"+INDEX_FILE+"' and '"+fid+"' in parents and trashed=false");
+    const r = await api('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id)');
+    const j = await r.json();
+    indexId = (j.files && j.files[0]) ? j.files[0].id : null;
+    return indexId;
+  }
+
+  function slim(r){            // 목록 파일에 넣을 가벼운 꼴 (사진 알맹이는 빼고)
+    return {
+      id:r.id, createdAt:r.createdAt, lat:r.lat, lng:r.lng, acc:r.acc,
+      alt:r.alt, altAcc:r.altAcc, heading:r.heading,
+      origLat:r.origLat, origLng:r.origLng, moved:!!r.moved, memo:r.memo||'',
+      media:(r.media||[]).filter(m=>m.driveId).map(m=>({
+        type:m.type, mime:m.mime, size:m.size, dur:m.dur,
+        name:m.name, driveId:m.driveId, thumbId:m.thumbId||null
+      }))
+    };
+  }
+
+  async function writeIndex(){
+    const all = await DB.all();
+    const body = new Blob([JSON.stringify(
+      {version:1, savedAt:Date.now(), records: all.map(slim).filter(r=>r.media.length)}
+    )], {type:'application/json'});
+    const id = await findIndex();
+    if(id) await overwriteBlob(id, body, 'application/json');
+    else   indexId = await uploadBlob(body, INDEX_FILE, 'application/json');
+  }
+
+  async function pushRecord(rec, onStep){
+    let changed = false;
+    for(let i=0;i<(rec.media||[]).length;i++){
+      const m = rec.media[i];
+      if(m.driveId) continue;
+      const b = mediaBlob(m);
+      if(!b) continue;
+      const ext = (m.type==='video') ? ((m.mime||'').includes('mp4')?'mp4':'webm') : 'jpg';
+      const nm  = fileStamp(rec.createdAt)+'_'+(i+1)+'.'+ext;
+      if(onStep) onStep(nm);
+      m.driveId = await uploadBlob(b, nm, m.mime || (m.type==='video'?'video/webm':'image/jpeg'));
+      m.name = nm;
+      if(m.thumbBuf && !m.thumbId){
+        try{
+          m.thumbId = await uploadBlob(new Blob([m.thumbBuf],{type:'image/jpeg'}),
+                                       nm.replace(/\.\w+$/,'')+'_t.jpg', 'image/jpeg');
+        }catch(e){}
+      }
+      changed = true;
+    }
+    if(changed) await DB.put(rec);
+    return changed;
+  }
+
+  async function pushAll(onStep){
+    const all = await DB.all();
+    let n = 0;
+    for(const r of all){
+      if((r.media||[]).every(m=>m.driveId)) continue;
+      if(await pushRecord(r, onStep)) n++;
+    }
+    await writeIndex();
+    await loadRecords();
+    return n;
+  }
+
+  async function pullAll(onStep){
+    const id = await findIndex();
+    if(!id) return 0;
+    const txt = await (await download(id)).text();
+    let j = null;
+    try{ j = JSON.parse(txt); }catch(e){ return 0; }
+    const list = (j && j.records) || [];
+    let n = 0;
+    for(const r of list){
+      const here = await DB.get(r.id);
+      if(here) continue;                       // 이미 있으면 그대로 둔다
+      if(onStep) onStep(fmtDT(r.createdAt));
+      const rec = Object.assign({}, r);
+      rec.media = (r.media||[]).map(m=>Object.assign({}, m));  // 알맹이는 열 때 받는다
+      for(const m of rec.media){
+        if(m.thumbId){
+          try{ m.thumbBuf = await (await download(m.thumbId)).arrayBuffer(); }catch(e){}
+        }
+      }
+      await DB.put(rec);
+      n++;
+    }
+    await loadRecords();
+    return n;
+  }
+
+  /* 사진 알맹이를 아직 안 받은 기록을 열 때 쓴다 */
+  async function fetchMedia(rec, i){
+    const m = rec.media[i];
+    if(!m || m.buf || !m.driveId) return null;
+    const b = await download(m.driveId);
+    m.buf = await b.arrayBuffer();
+    try{ await DB.put(rec); }catch(e){}
+    return b;
+  }
+
+  function paint(){
+    const b = $('#btnDrive');
+    if(!b) return;
+    b.textContent = signedIn() ? '드라이브' : '로그인';
+    const el2 = document.querySelector('#hdr .me');
+    if(el2) el2.textContent = signedIn() ? (me||'') : '';
+  }
+
+  async function signIn(){
+    await getToken('consent');
+    try{
+      const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {headers:hdr()});
+      if(r.ok){ const u = await r.json(); me = u.email || u.name || ''; }
+    }catch(e){}
+    try{ localStorage.setItem('jd_me', me); }catch(e){}
+    paint();
+  }
+
+  function signOut(){
+    try{ if(token && google.accounts.oauth2) google.accounts.oauth2.revoke(token, ()=>{}); }catch(e){}
+    token=null; tokenAt=0; folderId=null; indexId=null;
+    paint();
+  }
+
+  return {signedIn, signIn, signOut, pushAll, pullAll, pushRecord,
+          fetchMedia, writeIndex, paint, who:()=>me,
+          isBusy:()=>busy, setBusy:v=>{busy=v;}};
+})();
+
+/* ── 머리말 단추 ───────────────────────────────────────────── */
+$('#btnDrive').onclick = async ()=>{
+  if(!Drive.signedIn()){
+    try{
+      await Drive.signIn();
+      toast('로그인했습니다. 이제 드라이브에 올릴 수 있습니다.', 3000);
+      driveMenu();
+    }catch(e){ toast(e.message || '로그인하지 못했습니다.', 3600); }
+    return;
+  }
+  driveMenu();
+};
+
+async function driveMenu(){
+  const pick = await dialog({
+    title:'구글 드라이브',
+    text: (Drive.who()? Drive.who()+'\n' : '') +
+          '사진·영상은 손님 드라이브의 「지도일기」 폴더에 들어갑니다. 이 앱이 만든 파일만 다룹니다.',
+    html:'<label for="dAct">무엇을 할까요</label>'+
+         '<select id="dAct">'+
+           '<option value="push">이 폰의 기록을 드라이브에 올리기</option>'+
+           '<option value="pull">드라이브에 있는 기록을 이 폰으로 가져오기</option>'+
+           '<option value="out">로그아웃</option>'+
+         '</select>',
+    yes:'하기', no:'닫기',
+    hold: async (done)=>{
+      const act = $('#dAct').value;
+      if(act==='out'){ Drive.signOut(); done(true); toast('로그아웃했습니다.'); return; }
+      try{
+        if(act==='push'){
+          dlgProg('올리는 중…');
+          const n = await Drive.pushAll(nm=>dlgProg('올리는 중… '+nm));
+          dlgProg(''); done(true);
+          toast(n ? (n+'개 기록을 드라이브에 올렸습니다.') : '새로 올릴 것이 없습니다.', 3400);
+        } else {
+          dlgProg('가져오는 중…');
+          const n = await Drive.pullAll(t=>dlgProg('가져오는 중… '+t));
+          dlgProg(''); done(true);
+          toast(n ? (n+'개 기록을 가져왔습니다.') : '가져올 새 기록이 없습니다.', 3400);
+        }
+      }catch(e){
+        dlgProg('');
+        toast('드라이브 작업에 실패했습니다: '+(e.message||''), 4600);
+      }
+    }
+  });
+}
+</script>
+
 </body>
 </html>
