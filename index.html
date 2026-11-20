@@ -642,11 +642,43 @@ const DB = (()=>{
         r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error);
       }));
     },
-    put(rec){
+    // keep=true 면 시각을 건드리지 않는다 (드라이브에서 받아온 것, 사진 알맹이만 담아 둘 때)
+    put(rec, keep){
+      if(!keep) rec.updatedAt = Date.now();
+      else if(rec.updatedAt == null) rec.updatedAt = rec.createdAt || Date.now();
       return write(st=>{ st.put(rec); return rec; });
     },
     del(id){
       return write(st=>{ st.delete(id); return true; });
+    }
+  };
+})();
+
+/* ── 지운 명단 ───────────────────────────────────────────────
+   기록을 지우면 번호만 여기 적어 둔다. 이것이 없으면 다음에 드라이브와
+   맞출 때 "저쪽에는 있는데 이쪽에 없는 기록"으로 보여 다시 내려온다.
+   ========================================================== */
+const Tomb = (()=>{
+  const K = 'jd_gone', CAP = 800;
+  function load(){ try{ return JSON.parse(localStorage.getItem(K)||'{}'); }catch(e){ return {}; } }
+  function save(m){
+    const ks = Object.keys(m);
+    if(ks.length > CAP){                       // 오래된 것부터 덜어낸다
+      ks.sort((a,b)=>m[a]-m[b]).slice(0, ks.length-CAP).forEach(k=>{ delete m[k]; });
+    }
+    try{ localStorage.setItem(K, JSON.stringify(m)); }catch(e){}
+  }
+  return {
+    mark(id, at){ const m = load(); m[id] = at || Date.now(); save(m); },
+    at(id){ return load()[id] || 0; },
+    list(){ const m = load(); return Object.keys(m).map(id=>({id, at:m[id]})); },
+    merge(far){                                // 드라이브에서 받은 명단을 합친다
+      const m = load();
+      (far||[]).forEach(d=>{
+        if(!d || !d.id) return;
+        if(!m[d.id] || m[d.id] < d.at) m[d.id] = d.at;
+      });
+      save(m);
     }
   };
 })();
@@ -769,8 +801,14 @@ function vwUrl(layer, ext){
 }
 const ATTR_OSM = '&copy; OpenStreetMap contributors';
 const ATTR_VW  = '&copy; <a href="https://www.vworld.kr" target="_blank" rel="noopener">국토교통부 브이월드</a>';
+const ATTR_ESRI = 'Imagery &copy; Esri';
 
-let baseMode='base', satDead=false, osmTiles, satGroup;
+let baseMode='base', satDead=false, osmTiles, satGroup, esriSat, satWhich='kr';
+
+/* 한반도 안인지 (브이월드가 그림을 주는 범위) */
+function inKorea(ll){
+  return ll && ll.lat > 32.5 && ll.lat < 39.8 && ll.lng > 123.5 && ll.lng < 132.5;
+}
 
 /* 두 자리 사이의 거리 (m) */
 function distM(a, b){
@@ -818,7 +856,16 @@ function initMap(){
                    {maxZoom:19, minZoom:6, attribution:ATTR_VW, zIndex:1});
   const vwLabel = L.tileLayer(vwUrl('Hybrid'), {maxZoom:19, minZoom:6, zIndex:2});
   satGroup = L.layerGroup([vwSat, vwLabel]);
+
+  // 해외 위성사진. 브이월드는 국내만 나오므로 한반도를 벗어나면 이걸 쓴다.
+  esriSat = L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    {maxZoom:19, minZoom:3, attribution:ATTR_ESRI});
+
   osmTiles.addTo(map);
+
+  // 지도를 옮길 때마다 어느 쪽 위성사진을 쓸지 다시 고른다
+  map.on('moveend', ()=>{ if(baseMode==='sat') pickSat(); });
 
   // 위성이 응답하지 않으면 단추를 숨긴다
   let satErr=0;
@@ -846,11 +893,32 @@ function initMap(){
   setTimeout(()=>map.invalidateSize(), 300);
 }
 
+/* 지금 보고 있는 자리에 맞는 위성사진을 고른다 */
+function pickSat(){
+  const want = inKorea(map.getCenter()) ? 'kr' : 'world';
+  if(want === satWhich && (map.hasLayer(satGroup) || map.hasLayer(esriSat))) return;
+  satWhich = want;
+  if(want === 'kr'){
+    if(map.hasLayer(esriSat)) map.removeLayer(esriSat);
+    if(!map.hasLayer(satGroup)) satGroup.addTo(map);
+  } else {
+    if(map.hasLayer(satGroup)) map.removeLayer(satGroup);
+    if(!map.hasLayer(esriSat)) esriSat.addTo(map);
+  }
+}
+
 function setBase(m){
-  if(m==='sat' && satDead) return;
+  if(m==='sat' && satDead && inKorea(map.getCenter())) return;
   baseMode = m;
-  if(m==='sat'){ map.removeLayer(osmTiles); satGroup.addTo(map); }
-  else { if(map.hasLayer(satGroup)) map.removeLayer(satGroup); osmTiles.addTo(map); }
+  if(m==='sat'){
+    map.removeLayer(osmTiles);
+    satWhich = null;            // 다시 고르게 한다
+    pickSat();
+  } else {
+    if(map.hasLayer(satGroup)) map.removeLayer(satGroup);
+    if(map.hasLayer(esriSat))  map.removeLayer(esriSat);
+    osmTiles.addTo(map);
+  }
   updBaseBtn();
 }
 function updBaseBtn(){
@@ -1623,6 +1691,7 @@ async function openRec(id){
   bSave.onclick = async ()=>{
     curRec.memo = $('#memoEd').value.trim();
     await DB.put(curRec); await loadRecords();
+    pushEdit();
     toast('메모를 저장했습니다.');
   };
   const bFix = el('button'); bFix.textContent='핀 위치 손보기';
@@ -1644,7 +1713,7 @@ async function openRec(id){
       yes:'지우기', no:'그만두기', danger:true
     });
     if(!ok) return;
-    await DB.del(curRec.id); await loadRecords(); closeSheet();
+    await wipeRecord(curRec); await loadRecords(); closeSheet();
     toast('기록을 지웠습니다.');
   };
   row2.appendChild(bGo); row2.appendChild(bDel);
@@ -1653,6 +1722,25 @@ async function openRec(id){
   try{ history.pushState({v:'sheet'},''); }catch(e){}
   $('#sheet').classList.add('on');
 }
+/* 기록 하나를 지운다 — 지운 명단에 올리고 드라이브 쪽도 함께 치운다.
+   이렇게 해 두어야 다른 기기에서도 사라지고, 다시 내려오지 않는다. */
+async function pushEdit(){
+  try{
+    if(typeof Drive!=='undefined' && Drive.signedIn()) Drive.writeIndex().catch(()=>{});
+  }catch(e){}
+}
+
+async function wipeRecord(rec){
+  Tomb.mark(rec.id, Date.now());
+  await DB.del(rec.id);
+  try{
+    if(typeof Drive!=='undefined' && Drive.signedIn()){
+      Drive.drop(rec).catch(()=>{});
+      Drive.writeIndex().catch(()=>{});
+    }
+  }catch(e){}
+}
+
 /* 목록에서 기록 하나를 통째로 지우는 단추 */
 function delBtn(r){
   const b = el('button','del');
@@ -1668,7 +1756,7 @@ function delBtn(r){
     });
     if(!ok) return;
     try{
-      await DB.del(r.id);
+      await wipeRecord(r);
       await loadRecords();
       if($('#sheet').classList.contains('on')) closeSheet();
       toast('기록을 지웠습니다.');
@@ -1737,14 +1825,20 @@ async function removeMedia(r, i){
   if(!ok) return;
   try{
     if(last){
-      await DB.del(r.id);
+      await wipeRecord(r);
       await loadRecords();
       closeSheet();
       toast('기록을 지웠습니다.');
       return;
     }
-    r.media.splice(i,1);
+    const gone = r.media.splice(i,1)[0];
     await DB.put(r);
+    try{
+      if(typeof Drive!=='undefined' && Drive.signedIn()){
+        Drive.drop({media:[gone]}).catch(()=>{});
+        Drive.writeIndex().catch(()=>{});
+      }
+    }catch(e){}
     await loadRecords();
     closeSheet();
     await openRec(r.id);
@@ -1788,8 +1882,10 @@ async function saveFix(){
   const c = map.getCenter();
   if(fixRec.origLat==null){ fixRec.origLat = fixRec.lat; fixRec.origLng = fixRec.lng; }
   fixRec.lat = c.lat; fixRec.lng = c.lng; fixRec.moved = true;
+  fixRec.addr = '';                        // 자리를 옮겼으니 주소는 다시 받는다
   await DB.put(fixRec);
   await loadRecords();
+  pushEdit();
   endFix();
   toast('위치를 고쳤습니다. 원래 좌표도 함께 남겨 두었습니다.', 3000);
 }
@@ -2101,6 +2197,20 @@ const Drive = (()=>{
     return await r.blob();
   }
 
+  /* 기록에 딸린 드라이브 파일을 휴지통으로 보낸다 */
+  async function drop(rec){
+    for(const m of ((rec&&rec.media)||[])){
+      for(const fid of [m.driveId, m.thumbId]){
+        if(!fid) continue;
+        try{
+          await api('https://www.googleapis.com/drive/v3/files/'+fid, {
+            method:'PATCH', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({trashed:true})});
+        }catch(e){}
+      }
+    }
+  }
+
   async function findIndex(){
     if(indexId) return indexId;
     const fid = await ensureFolder();
@@ -2113,7 +2223,7 @@ const Drive = (()=>{
 
   function slim(r){            // 목록 파일에 넣을 가벼운 꼴 (사진 알맹이는 빼고)
     return {
-      id:r.id, createdAt:r.createdAt, lat:r.lat, lng:r.lng, acc:r.acc,
+      id:r.id, createdAt:r.createdAt, updatedAt:(r.updatedAt||r.createdAt), lat:r.lat, lng:r.lng, acc:r.acc,
       alt:r.alt, altAcc:r.altAcc, heading:r.heading,
       origLat:r.origLat, origLng:r.origLng, moved:!!r.moved, memo:r.memo||'', addr:r.addr||'',
       media:(r.media||[]).filter(m=>m.driveId).map(m=>({
@@ -2123,11 +2233,23 @@ const Drive = (()=>{
     };
   }
 
+  async function readIndex(){
+    const id = await findIndex();
+    if(!id) return null;
+    try{ return JSON.parse(await (await download(id)).text()); }catch(e){ return null; }
+  }
+
   async function writeIndex(){
+    const far = await readIndex();                 // 다른 기기가 올린 지운 명단을 먼저 챈다
+    if(far && far.deleted) Tomb.merge(far.deleted);
+    const gone = Tomb.list();
+    const goneSet = {}; gone.forEach(d=>{ goneSet[d.id]=1; });
     const all = await DB.all();
-    const body = new Blob([JSON.stringify(
-      {version:1, savedAt:Date.now(), records: all.map(slim).filter(r=>r.media.length)}
-    )], {type:'application/json'});
+    const body = new Blob([JSON.stringify({
+      version: 2, savedAt: Date.now(),
+      records: all.map(slim).filter(r=>r.media.length && !goneSet[r.id]),
+      deleted: gone
+    })], {type:'application/json'});
     const id = await findIndex();
     if(id) await overwriteBlob(id, body, 'application/json');
     else   indexId = await uploadBlob(body, INDEX_FILE, 'application/json');
@@ -2153,7 +2275,7 @@ const Drive = (()=>{
       }
       changed = true;
     }
-    if(changed) await DB.put(rec);
+    if(changed) await DB.put(rec, true);     // 올린 표시만 남기므로 시각은 그대로
     return changed;
   }
 
@@ -2170,25 +2292,43 @@ const Drive = (()=>{
   }
 
   async function pullAll(onStep){
-    const id = await findIndex();
-    if(!id) return 0;
-    const txt = await (await download(id)).text();
-    let j = null;
-    try{ j = JSON.parse(txt); }catch(e){ return 0; }
-    const list = (j && j.records) || [];
+    const j = await readIndex();
+    if(!j) return 0;
+    Tomb.merge(j.deleted);                     // 저쪽에서 지운 것을 받아 둔다
+    const list = j.records || [];
+    const when = r => (r && (r.updatedAt || r.createdAt)) || 0;
     let n = 0;
+
+    // ① 지운 명단에 오른 기록은 이쪽에서도 치운다
+    for(const d of Tomb.list()){
+      const here = await DB.get(d.id);
+      if(!here) continue;
+      if(when(here) > d.at) continue;          // 지운 뒤에 또 고쳤으면 살려 둔다
+      await DB.del(d.id);
+      drop(here).catch(()=>{});
+      n++;
+    }
+
+    // ② 없는 기록은 내려받고, 저쪽이 더 새 것이면 갈아 끼운다
     for(const r of list){
+      if(Tomb.at(r.id) >= when(r)) continue;   // 이쪽에서 지운 기록
       const here = await DB.get(r.id);
-      if(here) continue;                       // 이미 있으면 그대로 둔다
+      if(here && when(here) >= when(r)) continue;
       if(onStep) onStep(fmtDT(r.createdAt));
-      const rec = Object.assign({}, r);
-      rec.media = (r.media||[]).map(m=>Object.assign({}, m));  // 알맹이는 열 때 받는다
+      const rec = Object.assign({}, here||{}, r);
+      const kept = (r.media||[]).map(m=>{
+        const was = here && (here.media||[]).filter(x=>x.driveId && x.driveId===m.driveId)[0];
+        return was ? Object.assign({}, m, {buf:was.buf, thumbBuf:was.thumbBuf}) : Object.assign({}, m);
+      });
+      // 아직 올리지 못한 이쪽 사진은 잃지 않게 뒤에 붙인다
+      const pend = here ? (here.media||[]).filter(m=>!m.driveId) : [];
+      rec.media = kept.concat(pend);
       for(const m of rec.media){
-        if(m.thumbId){
+        if(!m.thumbBuf && m.thumbId){
           try{ m.thumbBuf = await (await download(m.thumbId)).arrayBuffer(); }catch(e){}
         }
       }
-      await DB.put(rec);
+      await DB.put(rec, true);                 // 저쪽 시각을 그대로 둔다
       n++;
     }
     await loadRecords();
@@ -2201,7 +2341,7 @@ const Drive = (()=>{
     if(!m || m.buf || !m.driveId) return null;
     const b = await download(m.driveId);
     m.buf = await b.arrayBuffer();
-    try{ await DB.put(rec); }catch(e){}
+    try{ await DB.put(rec, true); }catch(e){}
     return b;
   }
 
@@ -2266,7 +2406,7 @@ const Drive = (()=>{
     }catch(e){ return false; }
   }
 
-  return {signedIn, signIn, signOut, pushAll, pullAll, pushRecord, sync, lastSyncAt, resume,
+  return {signedIn, signIn, signOut, pushAll, pullAll, pushRecord, sync, lastSyncAt, resume, drop,
           fetchMedia, writeIndex, paint, who:()=>me,
           isBusy:()=>busy, setBusy:v=>{busy=v;}};
 })();
