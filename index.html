@@ -346,16 +346,22 @@
 
   /* 화면이 넓은 컴퓨터에서는 창이 가로로 늘어지지 않게 한다 */
   @media (min-width: 760px){
-    #sheet{align-items:center;justify-content:center;padding:24px;}
-    #sheetBox{
-      max-width:560px;max-height:88%;border-radius:14px;
-      box-shadow:0 10px 40px rgba(0,0,0,.35);
+    /* 기록은 왼쪽에 붙은 칸으로 뜬다. 오른쪽 지도는 그대로 보이고 움직일 수 있다. */
+    #sheet{
+      top:52px;bottom:0;left:0;right:auto;width:auto;
+      background:transparent;pointer-events:none;
+      align-items:stretch;justify-content:flex-start;padding:0;
     }
-    #bigWrap img,#bigWrap video{max-height:46vh;}
-    .sec,.btnRow{margin-left:14px;margin-right:14px;}
+    #sheetBox{
+      pointer-events:auto;
+      width:400px;max-width:400px;height:100%;max-height:100%;
+      border-radius:0;border-right:1px solid var(--line);
+      box-shadow:6px 0 26px rgba(0,0,0,.22);
+    }
+    #bigWrap img,#bigWrap video{max-height:42vh;}
     #srchWrap,#cnt,#cards{max-width:620px;margin-left:auto;margin-right:auto;}
     #cards .card{margin-left:0;margin-right:0;}
-    #toast{bottom:88px;}
+    #toast{left:auto;right:28px;transform:none;bottom:88px;}
   }
 
   /* 지도 단추 */
