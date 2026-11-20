@@ -1581,7 +1581,7 @@ async function openRec(id){
 
   // 위치
   const s1 = el('div','sec');
-  s1.innerHTML = '<h3>위치</h3>';
+  s1.innerHTML = '';          // '위치' 글씨는 넣지 않는다
   const kv = (k,v)=>{
     const d=el('div','kv');
     d.innerHTML='<span class="k">'+k+'</span><span class="v">'+v+'</span>';
