@@ -1,0 +1,1397 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0f3d3e">
+<title>지도일기</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root{
+    --navy:#0f3d3e; --teal:#1f6f6b; --sand:#f4efe6;
+    --ink:#1d2b2b; --line:#dcd6c9; --white:#fff;
+    --good:#1b8a4b; --warn:#c08a0a; --bad:#c0392b;
+    --safe-b: env(safe-area-inset-bottom, 0px);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",
+      "Noto Sans KR",sans-serif;
+    background:var(--sand); color:var(--ink);
+    font-size:15px; line-height:1.55; word-break:keep-all;
+  }
+  button{font-family:inherit;font-size:inherit;cursor:pointer;}
+
+  /* ── 머리말 ── */
+  #hdr{
+    position:absolute;top:0;left:0;right:0;height:52px;z-index:900;
+    background:var(--navy);color:#fff;display:flex;align-items:center;
+    padding:0 12px;gap:10px;
+  }
+  #hdr h1{margin:0;font-size:17px;font-weight:700;letter-spacing:-.3px;}
+  #hdr .sub{font-size:11.5px;opacity:.72;font-weight:500;}
+  #hdr .sp{flex:1;}
+  .hbtn{
+    background:rgba(255,255,255,.16);color:#fff;border:none;border-radius:16px;
+    padding:6px 12px;font-size:12.5px;font-weight:600;white-space:nowrap;
+  }
+  .hbtn:active{background:rgba(255,255,255,.3);}
+
+  /* ── 본문 칸 ── */
+  .page{position:absolute;top:52px;left:0;right:0;bottom:calc(60px + var(--safe-b));display:none;}
+  .page.on{display:block;}
+  #map{position:absolute;inset:0;background:#dfe6e3;}
+
+  /* 지도 위 작은 안내 */
+  #mapHint{
+    position:absolute;left:10px;right:10px;bottom:10px;z-index:500;
+    background:rgba(255,255,255,.94);border:1px solid var(--line);border-radius:10px;
+    padding:9px 12px;font-size:12.5px;color:#4a5a58;box-shadow:0 2px 8px rgba(0,0,0,.08);
+    display:none;
+  }
+  #mapHint b{color:var(--navy);}
+
+  /* 핀 손보기 띠 */
+  #fixBar{
+    position:absolute;left:0;right:0;top:0;z-index:950;background:var(--warn);color:#fff;
+    padding:10px 12px;font-size:13px;display:none;align-items:center;gap:8px;
+  }
+  #fixBar.on{display:flex;}
+  #fixBar span{flex:1;}
+  #fixBar button{
+    background:#fff;color:#8a6200;border:none;border-radius:14px;padding:5px 12px;
+    font-weight:700;font-size:12.5px;
+  }
+  #fixBar button.ghost{background:rgba(255,255,255,.25);color:#fff;}
+
+  /* ── 아래 단추 ── */
+  #nav{
+    position:absolute;left:0;right:0;bottom:0;z-index:900;
+    height:calc(60px + var(--safe-b));padding-bottom:var(--safe-b);
+    background:#fff;border-top:1px solid var(--line);
+    display:flex;align-items:stretch;
+  }
+  #nav button{
+    flex:1;background:none;border:none;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:2px;color:#8b9795;font-size:11px;
+    font-weight:600;padding:0;
+  }
+  #nav button .ic{font-size:21px;line-height:1;}
+  #nav button.on{color:var(--navy);}
+  #nav button#navShoot{
+    flex:0 0 76px;
+  }
+  #nav button#navShoot .ic{
+    width:46px;height:46px;border-radius:50%;background:var(--navy);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-size:22px;
+    margin-bottom:-2px;box-shadow:0 2px 8px rgba(15,61,62,.35);
+  }
+  #nav button#navShoot{color:var(--navy);}
+
+  /* ── 목록 ── */
+  #listPage{overflow-y:auto;-webkit-overflow-scrolling:touch;background:var(--sand);}
+  #srchWrap{
+    position:sticky;top:0;z-index:10;background:var(--sand);
+    padding:10px 12px 8px;border-bottom:1px solid var(--line);
+  }
+  #srch{
+    width:100%;border:1px solid var(--line);border-radius:18px;padding:9px 14px;
+    font-size:14px;background:#fff;color:var(--ink);
+  }
+  #srch:focus{outline:none;border-color:var(--teal);}
+  .perRow{display:flex;gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap;}
+  .perRow input[type=date]{
+    flex:1;min-width:0;border:1px solid var(--line);border-radius:12px;padding:6px 8px;
+    font-size:12.5px;background:#fff;color:var(--ink);font-family:inherit;
+  }
+  .perRow .tl{font-size:12px;color:#7b8785;}
+  .perRow button{
+    background:#fff;border:1px solid var(--line);border-radius:12px;padding:6px 10px;
+    font-size:12px;color:#5a6a68;
+  }
+  #cnt{padding:8px 14px 2px;font-size:12px;color:#7b8785;}
+  .card{
+    display:flex;gap:11px;background:#fff;margin:8px 12px;border-radius:12px;
+    border:1px solid var(--line);padding:10px;align-items:flex-start;
+  }
+  .card:active{background:#faf8f4;}
+  .card .th{
+    width:72px;height:72px;flex:0 0 72px;border-radius:9px;background:#eceae4;
+    object-fit:cover;display:block;
+  }
+  .card .thbox{position:relative;flex:0 0 72px;}
+  .card .vmark{
+    position:absolute;right:3px;bottom:3px;background:rgba(0,0,0,.6);color:#fff;
+    border-radius:5px;font-size:10px;padding:1px 4px;font-weight:600;
+  }
+  .card .bd{flex:1;min-width:0;}
+  .card .dt{font-size:12px;color:#7b8785;font-weight:600;}
+  .card .mm{
+    font-size:13.5px;margin:3px 0 5px;color:var(--ink);
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  }
+  .card .mm.none{color:#a8b2b0;font-style:italic;}
+  .card .meta{font-size:11.5px;color:#8b9795;display:flex;gap:7px;flex-wrap:wrap;align-items:center;}
+  .acc{font-weight:700;font-size:11px;padding:1px 6px;border-radius:9px;white-space:nowrap;}
+  .acc.g{background:#e4f3ea;color:var(--good);}
+  .acc.w{background:#fbf2dd;color:var(--warn);}
+  .acc.b{background:#fbe6e3;color:var(--bad);}
+  .empty{padding:48px 28px;text-align:center;color:#99a4a2;font-size:14px;}
+  .empty .big{font-size:34px;margin-bottom:10px;}
+
+  /* ── 촬영 화면 ── */
+  #cam{
+    position:fixed;inset:0;z-index:2000;background:#000;display:none;flex-direction:column;
+  }
+  #cam.on{display:flex;}
+  #camView{flex:1;position:relative;overflow:hidden;background:#000;}
+  #camVideo{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;}
+  #camTop{
+    position:absolute;top:0;left:0;right:0;padding:calc(10px + env(safe-area-inset-top,0px)) 12px 10px;
+    display:flex;align-items:center;gap:8px;
+    background:linear-gradient(rgba(0,0,0,.55),transparent);
+  }
+  #camClose{
+    background:rgba(0,0,0,.45);color:#fff;border:none;width:34px;height:34px;
+    border-radius:50%;font-size:17px;line-height:1;
+  }
+  #gpsChip{
+    display:flex;align-items:center;gap:6px;background:rgba(0,0,0,.5);
+    border-radius:16px;padding:5px 11px;color:#fff;font-size:12.5px;font-weight:700;
+  }
+  #gpsDot{width:9px;height:9px;border-radius:50%;background:#888;flex:0 0 9px;}
+  #gpsDot.g{background:#2ecc71;box-shadow:0 0 6px rgba(46,204,113,.8);}
+  #gpsDot.w{background:#f1c40f;box-shadow:0 0 6px rgba(241,196,15,.8);}
+  #gpsDot.b{background:#e74c3c;box-shadow:0 0 6px rgba(231,76,60,.8);}
+  #gpsNote{
+    position:absolute;top:calc(56px + env(safe-area-inset-top,0px));left:12px;right:12px;
+    background:rgba(0,0,0,.52);color:#fff;border-radius:9px;padding:7px 11px;
+    font-size:12px;line-height:1.5;display:none;
+  }
+  #recChip{
+    position:absolute;top:calc(14px + env(safe-area-inset-top,0px));left:50%;
+    transform:translateX(-50%);background:rgba(192,57,43,.92);color:#fff;
+    border-radius:14px;padding:4px 12px;font-size:12.5px;font-weight:700;display:none;
+    align-items:center;gap:6px;
+  }
+  #recChip.on{display:flex;}
+  #recChip .blink{width:8px;height:8px;border-radius:50%;background:#fff;animation:bl 1s infinite;}
+  @keyframes bl{0%,100%{opacity:1}50%{opacity:.25}}
+
+  #shots{
+    position:absolute;left:0;right:0;bottom:0;padding:8px 10px;display:flex;gap:7px;
+    overflow-x:auto;background:linear-gradient(transparent,rgba(0,0,0,.5));
+  }
+  #shots .sh{position:relative;flex:0 0 auto;}
+  #shots .sh img{width:52px;height:52px;object-fit:cover;border-radius:7px;border:2px solid #fff;display:block;}
+  #shots .sh .x{
+    position:absolute;top:-5px;right:-5px;width:19px;height:19px;border-radius:50%;
+    background:#000;color:#fff;border:1px solid #fff;font-size:11px;line-height:17px;
+    text-align:center;padding:0;
+  }
+  #shots .sh .vb{
+    position:absolute;left:2px;bottom:2px;background:rgba(0,0,0,.65);color:#fff;
+    font-size:9px;border-radius:4px;padding:0 3px;font-weight:700;
+  }
+
+  #camBar{
+    background:#111;padding:12px 14px calc(14px + var(--safe-b));
+    display:flex;align-items:center;gap:12px;
+  }
+  #modeSw{display:flex;background:#2a2a2a;border-radius:16px;padding:3px;flex:0 0 auto;}
+  #modeSw button{
+    background:none;border:none;color:#9a9a9a;font-size:12.5px;font-weight:700;
+    padding:5px 12px;border-radius:13px;
+  }
+  #modeSw button.on{background:#fff;color:#111;}
+  #shutter{
+    width:62px;height:62px;border-radius:50%;background:#fff;border:4px solid #555;
+    flex:0 0 62px;margin:0 auto;padding:0;
+  }
+  #shutter:active{transform:scale(.94);}
+  #shutter.rec{background:#e74c3c;border-color:#fff;border-radius:16px;width:56px;height:56px;}
+  #camDone{
+    background:var(--navy);color:#fff;border:none;border-radius:18px;padding:9px 15px;
+    font-size:13px;font-weight:700;flex:0 0 auto;opacity:.35;
+  }
+  #camDone.on{opacity:1;}
+  #camErr{
+    position:absolute;inset:0;display:none;flex-direction:column;align-items:center;
+    justify-content:center;gap:12px;padding:30px;text-align:center;color:#fff;
+    background:#111;font-size:14px;line-height:1.6;
+  }
+  #camErr.on{display:flex;}
+  #camErr button{
+    background:#fff;color:#111;border:none;border-radius:16px;padding:9px 18px;font-weight:700;
+  }
+
+  /* ── 기록 자세히 보기 ── */
+  #sheet{
+    position:fixed;inset:0;z-index:1500;background:rgba(0,0,0,.45);display:none;
+    align-items:flex-end;
+  }
+  #sheet.on{display:flex;}
+  #sheetBox{
+    background:var(--sand);width:100%;max-height:92%;border-radius:16px 16px 0 0;
+    display:flex;flex-direction:column;overflow:hidden;
+  }
+  #sheetHd{
+    display:flex;align-items:center;gap:10px;padding:12px 14px;background:#fff;
+    border-bottom:1px solid var(--line);
+  }
+  #sheetHd .t{flex:1;font-weight:700;font-size:14.5px;}
+  #sheetHd button{background:none;border:none;font-size:19px;color:#7b8785;padding:2px 4px;}
+  #sheetBody{overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:18px;}
+  #bigWrap{background:#000;position:relative;}
+  #bigWrap img,#bigWrap video{width:100%;max-height:58vh;object-fit:contain;display:block;background:#000;}
+  #bigNav{
+    display:flex;gap:6px;padding:7px 10px;overflow-x:auto;background:#111;
+  }
+  #bigNav button{
+    flex:0 0 auto;background:none;border:2px solid transparent;padding:0;border-radius:7px;
+    line-height:0;
+  }
+  #bigNav button.on{border-color:#fff;}
+  #bigNav img{width:46px;height:46px;object-fit:cover;border-radius:5px;display:block;}
+  .sec{background:#fff;margin:10px 12px;border:1px solid var(--line);border-radius:12px;padding:12px 13px;}
+  .sec h3{margin:0 0 8px;font-size:12px;color:#7b8785;font-weight:700;letter-spacing:.2px;}
+  .kv{display:flex;gap:10px;font-size:13.5px;padding:4px 0;}
+  .kv .k{flex:0 0 72px;color:#8b9795;font-size:12.5px;}
+  .kv .v{flex:1;min-width:0;}
+  #memoEd{
+    width:100%;border:1px solid var(--line);border-radius:10px;padding:10px;
+    font-size:14px;font-family:inherit;line-height:1.6;resize:vertical;min-height:84px;
+    color:var(--ink);background:#fdfcfa;
+  }
+  #memoEd:focus{outline:none;border-color:var(--teal);}
+  .btnRow{display:flex;gap:8px;margin:0 12px 12px;}
+  .btnRow button{
+    flex:1;border:1px solid var(--line);background:#fff;border-radius:12px;padding:11px;
+    font-size:13.5px;font-weight:700;color:var(--navy);
+  }
+  .btnRow button.pri{background:var(--navy);color:#fff;border-color:var(--navy);}
+  .btnRow button.dng{color:var(--bad);}
+
+  /* ── 작은 창 ── */
+  #dlg{
+    position:fixed;inset:0;z-index:1800;background:rgba(0,0,0,.45);display:none;
+    align-items:center;justify-content:center;padding:22px;
+  }
+  #dlg.on{display:flex;}
+  #dlgBox{
+    background:#fff;border-radius:14px;width:100%;max-width:360px;padding:18px;
+    max-height:86vh;overflow-y:auto;
+  }
+  #dlgBox h2{margin:0 0 6px;font-size:16px;}
+  #dlgBox p{margin:0 0 14px;font-size:13.5px;color:#5a6a68;line-height:1.6;}
+  #dlgBox label{display:block;font-size:12px;color:#7b8785;font-weight:700;margin:10px 0 4px;}
+  #dlgBox input,#dlgBox select{
+    width:100%;border:1px solid var(--line);border-radius:10px;padding:9px 11px;
+    font-size:14px;font-family:inherit;color:var(--ink);background:#fdfcfa;
+  }
+  #dlgBtns{display:flex;gap:8px;margin-top:16px;}
+  #dlgBtns button{
+    flex:1;border:1px solid var(--line);background:#fff;border-radius:11px;padding:10px;
+    font-weight:700;font-size:13.5px;color:#5a6a68;
+  }
+  #dlgBtns button.pri{background:var(--navy);color:#fff;border-color:var(--navy);}
+  #prog{margin-top:12px;font-size:13px;color:var(--teal);font-weight:600;display:none;}
+
+  /* 알림 띠 */
+  #toast{
+    position:fixed;left:50%;bottom:calc(76px + var(--safe-b));transform:translateX(-50%);
+    background:rgba(29,43,43,.94);color:#fff;padding:10px 16px;border-radius:20px;
+    font-size:13px;z-index:2500;opacity:0;pointer-events:none;transition:opacity .22s;
+    max-width:86%;text-align:center;line-height:1.5;
+  }
+  #toast.on{opacity:1;}
+
+  /* 지도 단추 */
+  .leaflet-bar.basectl a{
+    width:auto;min-width:46px;height:30px;line-height:30px;padding:0 10px;
+    font-size:12.5px;font-weight:700;color:var(--ink);background:#fff;
+    text-decoration:none;text-align:center;white-space:nowrap;display:block;
+  }
+  .pinico{display:block;}
+  .leaflet-popup-content{margin:9px 11px;font-size:13px;min-width:140px;}
+  .leaflet-popup-content .pm{font-weight:600;margin-bottom:3px;}
+  .leaflet-popup-content .pd{font-size:11.5px;color:#7b8785;}
+  .leaflet-popup-content button{
+    margin-top:7px;width:100%;background:var(--navy);color:#fff;border:none;
+    border-radius:9px;padding:7px;font-size:12.5px;font-weight:700;
+  }
+  .leaflet-container{font-family:inherit;}
+</style>
+</head>
+<body>
+
+<div id="hdr">
+  <h1>지도일기</h1>
+  <span class="sub" id="hdrSub"></span>
+  <span class="sp"></span>
+  <button class="hbtn" id="btnExport">내려받기</button>
+</div>
+
+<div class="page on" id="mapPage">
+  <div id="fixBar">
+    <span>지도를 움직여 핀을 옳은 자리로 옮기고 저장을 누르십시오.</span>
+    <button id="fixSave">저장</button>
+    <button class="ghost" id="fixCancel">취소</button>
+  </div>
+  <div id="map"></div>
+  <div id="mapHint"></div>
+</div>
+
+<div class="page" id="listPage">
+  <div id="srchWrap">
+    <input type="search" id="srch" placeholder="메모 내용으로 찾기" autocomplete="off">
+    <div class="perRow">
+      <input type="date" id="dFrom" aria-label="시작일">
+      <span class="tl">~</span>
+      <input type="date" id="dTo" aria-label="끝일">
+      <button id="dClear">전체</button>
+    </div>
+  </div>
+  <div id="cnt"></div>
+  <div id="cards"></div>
+</div>
+
+<div id="nav">
+  <button id="navMap" class="on"><span class="ic">🗺️</span>지도</button>
+  <button id="navShoot"><span class="ic">●</span>촬영</button>
+  <button id="navList"><span class="ic">📋</span>기록</button>
+</div>
+
+<div id="cam">
+  <div id="camView">
+    <video id="camVideo" playsinline autoplay muted></video>
+    <div id="camTop">
+      <button id="camClose">✕</button>
+      <div id="gpsChip"><span id="gpsDot"></span><span id="gpsTxt">위치 찾는 중</span></div>
+    </div>
+    <div id="gpsNote"></div>
+    <div id="recChip"><span class="blink"></span><span id="recTime">0:00</span> / 3:00</div>
+    <div id="shots"></div>
+    <div id="camErr">
+      <div id="camErrMsg"></div>
+      <button id="camErrBtn">닫기</button>
+    </div>
+  </div>
+  <div id="camBar">
+    <div id="modeSw">
+      <button id="mPhoto" class="on">사진</button>
+      <button id="mVideo">영상</button>
+    </div>
+    <button id="shutter" aria-label="촬영"></button>
+    <button id="camDone">저장</button>
+  </div>
+</div>
+
+<div id="sheet">
+  <div id="sheetBox">
+    <div id="sheetHd">
+      <span class="t" id="sheetTitle"></span>
+      <button id="sheetClose">✕</button>
+    </div>
+    <div id="sheetBody"></div>
+  </div>
+</div>
+
+<div id="dlg"><div id="dlgBox">
+  <h2 id="dlgTitle"></h2>
+  <p id="dlgText"></p>
+  <div id="dlgFields"></div>
+  <div id="prog"></div>
+  <div id="dlgBtns">
+    <button id="dlgNo">취소</button>
+    <button id="dlgYes" class="pri">확인</button>
+  </div>
+</div></div>
+
+<div id="toast"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+/* ======================================================================
+   지도일기 — 1차 본체
+   이 판은 기기(브라우저) 저장만 씁니다. 구글 로그인과 드라이브 연결은
+   캐패시터로 껍데기를 씌운 뒤에 붙입니다.
+   ====================================================================== */
+
+/* ── 작은 도구들 ────────────────────────────────────────────────── */
+const $ = s => document.querySelector(s);
+const el = (t,c) => { const d=document.createElement(t); if(c) d.className=c; return d; };
+
+const ACC_LINE = 30;            // 초록/빨강을 가르는 선 (m)
+const VIDEO_MAX = 180;          // 영상 최대 길이 (초) = 3분
+
+function accGrade(a){           // 오차 등급
+  if(a==null) return 'b';
+  if(a <= ACC_LINE) return 'g';
+  if(a <= ACC_LINE*2.5) return 'w';
+  return 'b';
+}
+function accText(a){
+  if(a==null) return '위치 없음';
+  return '±' + (a<10 ? a.toFixed(1) : Math.round(a)) + 'm';
+}
+function pad(n){ return n<10 ? '0'+n : ''+n; }
+function fmtDT(ms){
+  const d = new Date(ms);
+  return d.getFullYear()+'.'+pad(d.getMonth()+1)+'.'+pad(d.getDate())+
+         ' '+pad(d.getHours())+':'+pad(d.getMinutes());
+}
+function fmtDate(ms){
+  const d = new Date(ms);
+  return d.getFullYear()+'.'+pad(d.getMonth()+1)+'.'+pad(d.getDate());
+}
+function fileStamp(ms){
+  const d = new Date(ms);
+  return d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'_'+
+         pad(d.getHours())+pad(d.getMinutes())+pad(d.getSeconds());
+}
+function todayStr(){
+  const d = new Date();
+  return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+}
+function dur(sec){ return Math.floor(sec/60)+':'+pad(Math.floor(sec%60)); }
+function mb(b){ return b>=1048576 ? (b/1048576).toFixed(1)+'MB' : Math.round(b/1024)+'KB'; }
+
+let toastT = null;
+function toast(msg, ms){
+  const t = $('#toast');
+  t.textContent = msg; t.classList.add('on');
+  clearTimeout(toastT);
+  toastT = setTimeout(()=>t.classList.remove('on'), ms||2200);
+}
+
+/* 작은 창 — 확인받기 / 칸 채우기 */
+function dialog(opt){
+  return new Promise(res=>{
+    $('#dlgTitle').textContent = opt.title||'';
+    $('#dlgText').textContent  = opt.text||'';
+    $('#dlgText').style.display = opt.text ? '' : 'none';
+    $('#dlgFields').innerHTML = opt.html||'';
+    $('#dlgYes').textContent = opt.yes||'확인';
+    $('#dlgNo').textContent  = opt.no||'취소';
+    $('#dlgNo').style.display = opt.noHide ? 'none' : '';
+    $('#dlgYes').className = opt.danger ? '' : 'pri';
+    if(opt.danger) $('#dlgYes').style.color = 'var(--bad)';
+    else $('#dlgYes').style.color = '';
+    $('#prog').style.display='none'; $('#prog').textContent='';
+    $('#dlg').classList.add('on');
+    if(opt.after) opt.after();
+    const done = v => {
+      $('#dlg').classList.remove('on');
+      $('#dlgYes').onclick=null; $('#dlgNo').onclick=null;
+      res(v);
+    };
+    let running = false;
+    $('#dlgYes').onclick = ()=>{
+      if(opt.hold){
+        if(running) return;
+        running = true;
+        $('#dlgYes').style.opacity = '.5';
+        Promise.resolve(opt.hold(done)).finally(()=>{
+          running = false; $('#dlgYes').style.opacity = '';
+        });
+      } else done(true);
+    };
+    $('#dlgNo').onclick  = ()=>done(false);
+  });
+}
+function dlgProg(msg){
+  const p=$('#prog'); p.style.display = msg? '':'none'; p.textContent = msg||'';
+}
+
+/* ── 기기 저장 (IndexedDB) ─────────────────────────────────────── */
+const DB = (()=>{
+  const NAME='jidoilgi', VER=1, STORE='records';
+  let db = null;
+  function open(){
+    return new Promise((res,rej)=>{
+      if(db) return res(db);
+      const rq = indexedDB.open(NAME, VER);
+      rq.onupgradeneeded = e => {
+        const d = e.target.result;
+        if(!d.objectStoreNames.contains(STORE)){
+          const s = d.createObjectStore(STORE, {keyPath:'id'});
+          s.createIndex('createdAt','createdAt');
+        }
+      };
+      rq.onsuccess = e => { db = e.target.result; res(db); };
+      rq.onerror   = e => rej(e.target.error);
+    });
+  }
+  function tx(mode){
+    return open().then(d=>d.transaction(STORE, mode).objectStore(STORE));
+  }
+  return {
+    all(){
+      return tx('readonly').then(s=>new Promise((res,rej)=>{
+        const r = s.getAll();
+        r.onsuccess = ()=>res(r.result.sort((a,b)=>b.createdAt-a.createdAt));
+        r.onerror   = ()=>rej(r.error);
+      }));
+    },
+    get(id){
+      return tx('readonly').then(s=>new Promise((res,rej)=>{
+        const r = s.get(id);
+        r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error);
+      }));
+    },
+    put(rec){
+      return tx('readwrite').then(s=>new Promise((res,rej)=>{
+        const r = s.put(rec);
+        r.onsuccess=()=>res(rec); r.onerror=()=>rej(r.error);
+      }));
+    },
+    del(id){
+      return tx('readwrite').then(s=>new Promise((res,rej)=>{
+        const r = s.delete(id);
+        r.onsuccess=()=>res(true); r.onerror=()=>rej(r.error);
+      }));
+    }
+  };
+})();
+
+let records = [];   // 머리 속 사본 (최근순)
+
+/* ── 위치 잡기 ─────────────────────────────────────────────────── */
+const GPS = (()=>{
+  let watchId=null, best=null, last=null, listeners=[];
+  const KEEP = 20000;            // 이만큼 지난 값은 버린다 (ms)
+
+  function onFix(p){
+    const f = {
+      lat:p.coords.latitude, lng:p.coords.longitude,
+      acc:p.coords.accuracy,
+      alt:(p.coords.altitude!=null? p.coords.altitude : null),
+      altAcc:(p.coords.altitudeAccuracy!=null? p.coords.altitudeAccuracy : null),
+      heading:(p.coords.heading!=null && !isNaN(p.coords.heading) ? p.coords.heading : null),
+      t: p.timestamp || Date.now()
+    };
+    last = f;
+    // 더 정확한 값이거나, 기존 best가 오래됐으면 갈아끼운다
+    if(!best || f.acc <= best.acc || (Date.now()-best.t) > KEEP) best = f;
+    listeners.forEach(fn=>{ try{ fn(current()); }catch(e){} });
+  }
+  function onErr(e){
+    listeners.forEach(fn=>{ try{ fn(null, e); }catch(_){} });
+  }
+  function current(){
+    if(best && (Date.now()-best.t) <= KEEP) return best;
+    return last;
+  }
+  return {
+    start(){
+      if(watchId!=null) return;
+      best=null;
+      if(!navigator.geolocation){ onErr({code:-1}); return; }
+      watchId = navigator.geolocation.watchPosition(onFix, onErr, {
+        enableHighAccuracy:true, timeout:20000, maximumAge:0
+      });
+    },
+    stop(){
+      if(watchId!=null){ navigator.geolocation.clearWatch(watchId); watchId=null; }
+    },
+    reset(){ best=null; },
+    current,
+    on(fn){ listeners.push(fn); },
+    off(fn){ listeners = listeners.filter(x=>x!==fn); }
+  };
+})();
+
+/* ── 지도 ──────────────────────────────────────────────────────── */
+let map, markerLayer, meMarker, fixMarker=null, fixRec=null;
+
+const VWORLD_KEY = '619093BB-C6F2-4A99-81E2-077A7E973171';
+function vwUrl(layer, ext){
+  return 'https://api.vworld.kr/req/wmts/1.0.0/'+VWORLD_KEY+'/'+layer+
+         '/{z}/{y}/{x}.'+(ext||'png');
+}
+const ATTR_OSM = '&copy; OpenStreetMap contributors';
+const ATTR_VW  = '&copy; <a href="https://www.vworld.kr" target="_blank" rel="noopener">국토교통부 브이월드</a>';
+
+let baseMode='base', satDead=false, osmTiles, satGroup;
+
+function pinIcon(grade, big){
+  const col = grade==='g' ? '#1b8a4b' : grade==='w' ? '#c08a0a' : '#c0392b';
+  const w = big?36:30, h = big?46:38;
+  const svg =
+    '<svg class="pinico" width="'+w+'" height="'+h+'" viewBox="0 0 30 38" '+
+    'xmlns="http://www.w3.org/2000/svg">'+
+    '<path d="M15 1C7.8 1 2 6.8 2 14c0 9.2 13 23 13 23s13-13.8 13-23C28 6.8 22.2 1 15 1z" '+
+    'fill="'+col+'" stroke="#fff" stroke-width="2.2"/>'+
+    '<circle cx="15" cy="13.6" r="4.6" fill="#fff"/></svg>';
+  return L.divIcon({
+    html:svg, className:'', iconSize:[w,h],
+    iconAnchor:[w/2,h], popupAnchor:[0,-h+6]
+  });
+}
+
+function initMap(){
+  map = L.map('map', {
+    center:[36.3504,127.3845], zoom:11, minZoom:3, maxZoom:19,
+    zoomControl:true, attributionControl:true
+  });
+
+  osmTiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom:19, maxNativeZoom:18, minZoom:3, attribution:ATTR_OSM
+  });
+  const vwSat   = L.tileLayer(vwUrl('Satellite','jpeg'),
+                   {maxZoom:19, minZoom:6, attribution:ATTR_VW, zIndex:1});
+  const vwLabel = L.tileLayer(vwUrl('Hybrid'), {maxZoom:19, minZoom:6, zIndex:2});
+  satGroup = L.layerGroup([vwSat, vwLabel]);
+  osmTiles.addTo(map);
+
+  // 위성이 응답하지 않으면 단추를 숨긴다
+  let satErr=0;
+  vwSat.on('tileerror', ()=>{
+    if(++satErr>8 && !satDead){ satDead=true; setBase('base'); updBaseBtn(); }
+  });
+
+  const ctl = L.control({position:'topright'});
+  ctl.onAdd = function(){
+    const d = L.DomUtil.create('div','leaflet-bar basectl');
+    d.innerHTML = '<a href="#" id="baseToggle" role="button">위성</a>';
+    L.DomEvent.disableClickPropagation(d);
+    L.DomEvent.on(d,'click', function(e){
+      L.DomEvent.preventDefault(e);
+      setBase(baseMode==='base' ? 'sat' : 'base');
+    });
+    return d;
+  };
+  ctl.addTo(map);
+
+  markerLayer = L.layerGroup().addTo(map);
+
+  // 화면 크기가 나중에 바뀌는 폰을 위해 다시 재어준다
+  window.addEventListener('resize', ()=>setTimeout(()=>map.invalidateSize(),120));
+  setTimeout(()=>map.invalidateSize(), 300);
+}
+
+function setBase(m){
+  if(m==='sat' && satDead) return;
+  baseMode = m;
+  if(m==='sat'){ map.removeLayer(osmTiles); satGroup.addTo(map); }
+  else { if(map.hasLayer(satGroup)) map.removeLayer(satGroup); osmTiles.addTo(map); }
+  updBaseBtn();
+}
+function updBaseBtn(){
+  const a = document.getElementById('baseToggle');
+  if(!a) return;
+  a.textContent = (baseMode==='base') ? '위성' : '일반';
+  a.style.display = satDead ? 'none' : '';
+}
+
+/* 내 위치 보여주기 */
+function showMe(fix){
+  if(!fix || !map) return;
+  const ll = [fix.lat, fix.lng];
+  if(!meMarker){
+    meMarker = L.circleMarker(ll, {
+      radius:7, color:'#fff', weight:2.5, fillColor:'#1f6f6b', fillOpacity:1
+    }).addTo(map);
+  } else meMarker.setLatLng(ll);
+}
+
+/* 지도에 기록 핀 찍기 */
+function drawPins(list){
+  if(!markerLayer) return;
+  markerLayer.clearLayers();
+  list.forEach(r=>{
+    if(r.lat==null) return;
+    const m = L.marker([r.lat,r.lng], {icon:pinIcon(accGrade(r.acc))});
+    const memo = r.memo ? r.memo.replace(/[<>&]/g,'') : '(메모 없음)';
+    const short = memo.length>40 ? memo.slice(0,40)+'…' : memo;
+    const n = (r.media||[]).length;
+    m.bindPopup(
+      '<div class="pm">'+short+'</div>'+
+      '<div class="pd">'+fmtDT(r.createdAt)+' · '+accText(r.acc)+
+      (n?' · 사진·영상 '+n+'개':'')+'</div>'+
+      '<button onclick="openRec(\''+r.id+'\')">크게 보기</button>'
+    );
+    markerLayer.addLayer(m);
+  });
+}
+</script>
+<script>
+/* ── 촬영 화면 ─────────────────────────────────────────────────── */
+const CAM = (()=>{
+  let stream=null, mode='photo', shots=[], rec=null, recChunks=[],
+      recStart=0, recTimer=null, busy=false;
+
+  const cv = el('canvas');   // 그림 뜨기용 (화면에 안 붙인다)
+
+  function gpsPaint(fix){
+    const dot=$('#gpsDot'), txt=$('#gpsTxt'), note=$('#gpsNote');
+    if(!fix){
+      dot.className=''; txt.textContent='위치 찾는 중';
+      note.style.display='none'; return;
+    }
+    const g = accGrade(fix.acc);
+    dot.className = g;
+    txt.textContent = accText(fix.acc);
+    if(g==='g'){ note.style.display='none'; }
+    else {
+      note.style.display='';
+      note.textContent = (g==='w')
+        ? '좌표를 더 좁히는 중입니다. 몇 초 기다리면 숫자가 줄어듭니다.'
+        : '위치가 넓게 잡혔습니다. 잠깐 기다리거나 하늘이 트인 쪽으로 몇 걸음 나가 보십시오. 지금 찍어도 기록은 남고, 오차가 함께 저장됩니다.';
+    }
+  }
+
+  async function startStream(){
+    stopStream();
+    const want = {
+      video:{ facingMode:{ideal:'environment'},
+              width:{ideal:3840}, height:{ideal:2160} },
+      audio: (mode==='video')
+    };
+    try{
+      stream = await navigator.mediaDevices.getUserMedia(want);
+    }catch(e){
+      try{  // 해상도를 낮춰 다시
+        stream = await navigator.mediaDevices.getUserMedia(
+          {video:{facingMode:{ideal:'environment'}}, audio:(mode==='video')});
+      }catch(e2){ throw e2; }
+    }
+    const v = $('#camVideo');
+    v.srcObject = stream;
+    await v.play().catch(()=>{});
+  }
+  function stopStream(){
+    if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
+    $('#camVideo').srcObject = null;
+  }
+
+  function showErr(msg){
+    $('#camErrMsg').textContent = msg;
+    $('#camErr').classList.add('on');
+  }
+
+  async function open(){
+    shots=[]; paintShots();
+    $('#cam').classList.add('on');
+    $('#camErr').classList.remove('on');
+    GPS.reset(); GPS.start(); GPS.on(gpsPaint); gpsPaint(GPS.current());
+    try{ await startStream(); }
+    catch(e){
+      let m = '카메라를 열 수 없습니다.';
+      if(e && (e.name==='NotAllowedError'||e.name==='SecurityError'))
+        m = '카메라 권한이 막혀 있습니다. 브라우저 설정에서 이 주소의 카메라를 허용해 주십시오.';
+      else if(e && e.name==='NotFoundError') m = '쓸 수 있는 카메라를 찾지 못했습니다.';
+      else if(location.protocol!=='https:' && location.hostname!=='localhost')
+        m = '카메라는 https 주소에서만 열립니다.';
+      showErr(m);
+    }
+  }
+  function close(){
+    if(rec && rec.state==='recording'){ try{ rec.stop(); }catch(e){} }
+    clearInterval(recTimer); recTimer=null;
+    $('#recChip').classList.remove('on');
+    stopStream(); GPS.off(gpsPaint);
+    $('#cam').classList.remove('on');
+    shots.forEach(s=>{ if(s.thumbUrl) URL.revokeObjectURL(s.thumbUrl); });
+    shots=[];
+    $('#shutter').classList.remove('rec');
+  }
+
+  function paintShots(){
+    const box=$('#shots'); box.innerHTML='';
+    shots.forEach((s,i)=>{
+      const w=el('div','sh');
+      const img=el('img'); img.src=s.thumbUrl; w.appendChild(img);
+      if(s.type==='video'){
+        const b=el('div','vb'); b.textContent=dur(s.dur); w.appendChild(b);
+      }
+      const x=el('button','x'); x.textContent='✕';
+      x.onclick=()=>{ URL.revokeObjectURL(s.thumbUrl); shots.splice(i,1); paintShots(); };
+      w.appendChild(x);
+      box.appendChild(w);
+    });
+    $('#camDone').classList.toggle('on', shots.length>0);
+  }
+
+  function makeThumb(srcEl, w, h){
+    const max=200;
+    const sc = Math.min(max/w, max/h, 1);
+    cv.width = Math.max(1,Math.round(w*sc));
+    cv.height= Math.max(1,Math.round(h*sc));
+    cv.getContext('2d').drawImage(srcEl,0,0,cv.width,cv.height);
+    return new Promise(res=>cv.toBlob(res,'image/jpeg',0.72));
+  }
+
+  async function takePhoto(){
+    if(busy || !stream) return;
+    busy=true;
+    try{
+      const v=$('#camVideo');
+      const w=v.videoWidth, h=v.videoHeight;
+      if(!w||!h){ toast('카메라가 아직 준비되지 않았습니다.'); busy=false; return; }
+      cv.width=w; cv.height=h;
+      cv.getContext('2d').drawImage(v,0,0,w,h);
+      const blob = await new Promise(res=>cv.toBlob(res,'image/jpeg',0.95));
+      const thumb= await makeThumb(v,w,h);
+      const fix  = GPS.current();
+      shots.push({type:'photo', blob, size:blob.size, thumb,
+                  thumbUrl:URL.createObjectURL(thumb), w, h, fix});
+      paintShots();
+      toast('사진 '+shots.length+'장');
+    }catch(e){ toast('사진을 찍지 못했습니다.'); }
+    busy=false;
+  }
+
+  function pickMime(){
+    const list=['video/mp4;codecs=avc1','video/mp4',
+                'video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];
+    for(const m of list){
+      if(window.MediaRecorder && MediaRecorder.isTypeSupported &&
+         MediaRecorder.isTypeSupported(m)) return m;
+    }
+    return '';
+  }
+
+  function startRec(){
+    if(!stream || !window.MediaRecorder){ toast('이 브라우저는 영상 촬영을 지원하지 않습니다.'); return; }
+    const mime = pickMime();
+    try{
+      rec = mime ? new MediaRecorder(stream,{mimeType:mime, videoBitsPerSecond:12000000})
+                 : new MediaRecorder(stream);
+    }catch(e){ toast('영상 촬영을 시작할 수 없습니다.'); return; }
+    recChunks=[];
+    rec.ondataavailable = e=>{ if(e.data && e.data.size) recChunks.push(e.data); };
+    rec.onstop = async ()=>{
+      clearInterval(recTimer); recTimer=null;
+      $('#recChip').classList.remove('on');
+      $('#shutter').classList.remove('rec');
+      const sec = Math.max(1, Math.round((Date.now()-recStart)/1000));
+      const blob = new Blob(recChunks, {type: rec.mimeType || 'video/webm'});
+      recChunks=[];
+      if(!blob.size){ toast('영상이 비어 있습니다.'); return; }
+      const v=$('#camVideo');
+      const thumb = await makeThumb(v, v.videoWidth||640, v.videoHeight||480);
+      const fix = GPS.current();
+      shots.push({type:'video', blob, size:blob.size, thumb,
+                  thumbUrl:URL.createObjectURL(thumb), dur:sec,
+                  mime: blob.type, fix});
+      paintShots();
+      toast('영상 '+dur(sec)+' ('+mb(blob.size)+')');
+    };
+    rec.start(1000);
+    recStart = Date.now();
+    $('#shutter').classList.add('rec');
+    $('#recChip').classList.add('on');
+    $('#recTime').textContent = '0:00';
+    recTimer = setInterval(()=>{
+      const s = Math.floor((Date.now()-recStart)/1000);
+      $('#recTime').textContent = dur(s);
+      if(s >= VIDEO_MAX){ toast('3분이 되어 멈췄습니다.'); stopRec(); }
+    }, 250);
+  }
+  function stopRec(){
+    if(rec && rec.state==='recording'){ try{ rec.stop(); }catch(e){} }
+  }
+
+  async function setMode(m){
+    if(mode===m) return;
+    if(rec && rec.state==='recording') return;
+    mode=m;
+    $('#mPhoto').classList.toggle('on', m==='photo');
+    $('#mVideo').classList.toggle('on', m==='video');
+    $('#shutter').classList.remove('rec');
+    try{ await startStream(); }
+    catch(e){ showErr('카메라를 다시 열 수 없습니다.'); }
+  }
+
+  async function save(){
+    if(!shots.length) return;
+    let memo='';
+    const ok = await dialog({
+      title:'기록 저장',
+      text:'사진·영상 '+shots.length+'개를 한 기록으로 저장합니다.',
+      html:'<label for="mIn">메모</label>'+
+           '<textarea id="mIn" rows="4" style="width:100%;border:1px solid var(--line);'+
+           'border-radius:10px;padding:10px;font-family:inherit;font-size:14px;'+
+           'line-height:1.6;background:#fdfcfa;color:var(--ink);" '+
+           'placeholder="본 것, 느낀 것을 적어 두십시오. 비워 두어도 됩니다."></textarea>',
+      yes:'저장', no:'더 찍기',
+      after:()=>{ setTimeout(()=>{ const t=$('#mIn'); if(t) t.focus(); }, 80); }
+    });
+    if(!ok) return;
+    memo = ($('#mIn') && $('#mIn').value || '').trim();
+
+    // 여러 장 가운데 가장 정확한 위치를 그 기록의 위치로 쓴다
+    let fix=null;
+    shots.forEach(s=>{ if(s.fix && (!fix || s.fix.acc < fix.acc)) fix = s.fix; });
+
+    const now = Date.now();
+    const recObj = {
+      id: 'r'+now+'_'+Math.random().toString(36).slice(2,7),
+      createdAt: now,
+      lat: fix? fix.lat : null,
+      lng: fix? fix.lng : null,
+      acc: fix? fix.acc : null,
+      alt: fix? fix.alt : null,          // 고도 — 저장만 하고 화면에는 안 띄운다
+      altAcc: fix? fix.altAcc : null,
+      heading: fix? fix.heading : null,  // 방위 — 같음
+      origLat:null, origLng:null, moved:false,
+      memo: memo,
+      media: shots.map(s=>({
+        type:s.type, blob:s.blob, thumb:s.thumb, size:s.size,
+        dur:(s.dur||null), mime:(s.mime||s.blob.type||'')
+      }))
+    };
+    try{
+      await DB.put(recObj);
+      shots.forEach(s=>{ if(s.thumbUrl) URL.revokeObjectURL(s.thumbUrl); });
+      shots=[]; paintShots();
+      await loadRecords();
+      close();
+      toast('기록을 저장했습니다.');
+      if(recObj.lat!=null){ goMap(); map.setView([recObj.lat,recObj.lng], 16); }
+    }catch(e){
+      toast('저장하지 못했습니다. 저장 공간이 부족할 수 있습니다.', 3600);
+    }
+  }
+
+  return {open, close, takePhoto, startRec, stopRec, setMode, save,
+          isRec:()=>!!(rec && rec.state==='recording'),
+          mode:()=>mode};
+})();
+
+/* ── 목록 ──────────────────────────────────────────────────────── */
+let thumbUrls = [];
+function clearThumbUrls(){ thumbUrls.forEach(u=>URL.revokeObjectURL(u)); thumbUrls=[]; }
+
+function filtered(){
+  const q = ($('#srch').value||'').trim().toLowerCase();
+  const f = $('#dFrom').value, t = $('#dTo').value;
+  const fMs = f ? new Date(f+'T00:00:00').getTime() : null;
+  const tMs = t ? new Date(t+'T23:59:59.999').getTime() : null;
+  return records.filter(r=>{
+    if(q && !(r.memo||'').toLowerCase().includes(q)) return false;
+    if(fMs!=null && r.createdAt < fMs) return false;
+    if(tMs!=null && r.createdAt > tMs) return false;
+    return true;
+  });
+}
+
+function renderList(){
+  const list = filtered();
+  clearThumbUrls();
+  const box = $('#cards'); box.innerHTML='';
+  $('#cnt').textContent = records.length
+    ? (list.length===records.length ? '기록 '+records.length+'개'
+       : '기록 '+list.length+'개 (전체 '+records.length+'개 가운데)')
+    : '';
+  if(!records.length){
+    const e=el('div','empty');
+    e.innerHTML='<div class="big">📍</div>아직 기록이 없습니다.<br>아래 가운데 단추를 눌러 첫 기록을 남겨 보십시오.';
+    box.appendChild(e);
+    drawPins([]); return;
+  }
+  if(!list.length){
+    const e=el('div','empty');
+    e.innerHTML='<div class="big">🔍</div>찾는 조건에 맞는 기록이 없습니다.';
+    box.appendChild(e);
+    drawPins([]); return;
+  }
+  list.forEach(r=>{
+    const c = el('div','card');
+    const tb = el('div','thbox');
+    const m0 = (r.media||[])[0];
+    const img = el('img','th');
+    if(m0 && m0.thumb){ const u=URL.createObjectURL(m0.thumb); thumbUrls.push(u); img.src=u; }
+    tb.appendChild(img);
+    const vids = (r.media||[]).filter(m=>m.type==='video').length;
+    const n = (r.media||[]).length;
+    if(n>1){ const b=el('div','vmark'); b.textContent=n+'개'; tb.appendChild(b); }
+    else if(vids){ const b=el('div','vmark'); b.textContent='영상'; tb.appendChild(b); }
+    c.appendChild(tb);
+
+    const bd = el('div','bd');
+    const dt = el('div','dt'); dt.textContent = fmtDT(r.createdAt); bd.appendChild(dt);
+    const mm = el('div', r.memo? 'mm':'mm none');
+    mm.textContent = r.memo || '메모 없음'; bd.appendChild(mm);
+    const me = el('div','meta');
+    const a = el('span','acc '+accGrade(r.acc)); a.textContent = accText(r.acc);
+    me.appendChild(a);
+    if(r.moved){ const s=el('span'); s.textContent='위치 손봄'; me.appendChild(s); }
+    if(vids){ const s=el('span'); s.textContent='영상 '+vids+'개'; me.appendChild(s); }
+    bd.appendChild(me);
+    c.appendChild(bd);
+    c.onclick = ()=>openRec(r.id);
+    box.appendChild(c);
+  });
+  drawPins(list);
+}
+
+/* ── 기록 크게 보기 ────────────────────────────────────────────── */
+let sheetUrls = [], curRec = null;
+function clearSheetUrls(){ sheetUrls.forEach(u=>URL.revokeObjectURL(u)); sheetUrls=[]; }
+
+async function openRec(id){
+  const r = await DB.get(id);
+  if(!r){ toast('기록을 찾지 못했습니다.'); return; }
+  curRec = r;
+  $('#sheetTitle').textContent = fmtDT(r.createdAt);
+  const body = $('#sheetBody');
+  clearSheetUrls();
+  body.innerHTML = '';
+
+  const media = r.media||[];
+  if(media.length){
+    const wrap = el('div'); wrap.id='bigWrap';
+    body.appendChild(wrap);
+    const nav = el('div'); nav.id='bigNav';
+    const show = i=>{
+      wrap.innerHTML='';
+      const m = media[i];
+      const u = URL.createObjectURL(m.blob); sheetUrls.push(u);
+      if(m.type==='video'){
+        const v=el('video'); v.src=u; v.controls=true; v.playsInline=true;
+        wrap.appendChild(v);
+      } else {
+        const im=el('img'); im.src=u; wrap.appendChild(im);
+      }
+      [...nav.children].forEach((b,j)=>b.classList.toggle('on', j===i));
+    };
+    media.forEach((m,i)=>{
+      const b=el('button');
+      const im=el('img');
+      if(m.thumb){ const tu=URL.createObjectURL(m.thumb); sheetUrls.push(tu); im.src=tu; }
+      b.appendChild(im);
+      b.onclick=()=>show(i);
+      nav.appendChild(b);
+    });
+    if(media.length>1) body.appendChild(nav);
+    show(0);
+  }
+
+  // 위치
+  const s1 = el('div','sec');
+  s1.innerHTML = '<h3>위치</h3>';
+  const kv = (k,v)=>{
+    const d=el('div','kv');
+    d.innerHTML='<span class="k">'+k+'</span><span class="v">'+v+'</span>';
+    return d;
+  };
+  if(r.lat!=null){
+    s1.appendChild(kv('좌표', r.lat.toFixed(6)+', '+r.lng.toFixed(6)));
+    s1.appendChild(kv('오차', '<span class="acc '+accGrade(r.acc)+'">'+accText(r.acc)+'</span>'));
+    if(r.moved && r.origLat!=null){
+      s1.appendChild(kv('원래 좌표', r.origLat.toFixed(6)+', '+r.origLng.toFixed(6)));
+    }
+  } else {
+    s1.appendChild(kv('좌표','위치를 받지 못한 기록입니다.'));
+  }
+  body.appendChild(s1);
+
+  // 메모
+  const s2 = el('div','sec');
+  s2.innerHTML = '<h3>메모</h3><textarea id="memoEd" placeholder="메모를 적어 두십시오."></textarea>';
+  body.appendChild(s2);
+  $('#memoEd').value = r.memo||'';
+
+  // 파일
+  if(media.length){
+    const s3 = el('div','sec');
+    s3.innerHTML = '<h3>사진·영상</h3>';
+    let tot=0;
+    media.forEach((m,i)=>{
+      tot += (m.size||0);
+      s3.appendChild(kv((i+1)+'.',
+        (m.type==='video' ? '영상 '+dur(m.dur||0) : '사진')+' · '+mb(m.size||0)));
+    });
+    s3.appendChild(kv('합계', mb(tot)));
+    body.appendChild(s3);
+  }
+
+  const row1 = el('div','btnRow');
+  const bSave = el('button','pri'); bSave.textContent='메모 저장';
+  bSave.onclick = async ()=>{
+    curRec.memo = $('#memoEd').value.trim();
+    await DB.put(curRec); await loadRecords();
+    toast('메모를 저장했습니다.');
+  };
+  const bFix = el('button'); bFix.textContent='핀 위치 손보기';
+  bFix.onclick = ()=>startFix(curRec);
+  row1.appendChild(bSave); row1.appendChild(bFix);
+  body.appendChild(row1);
+
+  const row2 = el('div','btnRow');
+  const bGo = el('button'); bGo.textContent='지도에서 보기';
+  bGo.onclick = ()=>{
+    closeSheet();
+    if(curRec.lat==null){ toast('위치가 없는 기록입니다.'); return; }
+    goMap(); map.setView([curRec.lat,curRec.lng], 17);
+  };
+  const bDel = el('button','dng'); bDel.textContent='기록 지우기';
+  bDel.onclick = async ()=>{
+    const ok = await dialog({
+      title:'기록을 지웁니다', text:'이 기록과 딸린 사진·영상이 함께 사라집니다. 되돌릴 수 없습니다.',
+      yes:'지우기', no:'그만두기', danger:true
+    });
+    if(!ok) return;
+    await DB.del(curRec.id); await loadRecords(); closeSheet();
+    toast('기록을 지웠습니다.');
+  };
+  row2.appendChild(bGo); row2.appendChild(bDel);
+  body.appendChild(row2);
+
+  try{ history.pushState({v:'sheet'},''); }catch(e){}
+  $('#sheet').classList.add('on');
+}
+function closeSheet(){
+  $('#sheet').classList.remove('on');
+  clearSheetUrls();
+  $('#sheetBody').innerHTML='';
+  curRec=null;
+}
+window.openRec = openRec;
+
+/* ── 핀 위치 손보기 ────────────────────────────────────────────── */
+function startFix(r){
+  if(r.lat==null){ toast('위치가 없는 기록은 손볼 수 없습니다.'); return; }
+  closeSheet(); goMap();
+  fixRec = r;
+  map.setView([r.lat,r.lng], Math.max(map.getZoom(), 17));
+  if(!satDead) setBase('sat');            // 위성으로 바꿔 두면 자리를 짚기 쉽다
+  if(fixMarker) map.removeLayer(fixMarker);
+  fixMarker = L.marker(map.getCenter(), {icon:pinIcon('w', true), interactive:false})
+                .addTo(map);
+  map.on('move', fixFollow);
+  $('#fixBar').classList.add('on');
+  $('#mapHint').style.display='none';
+}
+function fixFollow(){ if(fixMarker) fixMarker.setLatLng(map.getCenter()); }
+function endFix(){
+  map.off('move', fixFollow);
+  if(fixMarker){ map.removeLayer(fixMarker); fixMarker=null; }
+  $('#fixBar').classList.remove('on');
+  fixRec=null;
+}
+async function saveFix(){
+  if(!fixRec) return endFix();
+  const c = map.getCenter();
+  if(fixRec.origLat==null){ fixRec.origLat = fixRec.lat; fixRec.origLng = fixRec.lng; }
+  fixRec.lat = c.lat; fixRec.lng = c.lng; fixRec.moved = true;
+  await DB.put(fixRec);
+  await loadRecords();
+  endFix();
+  toast('위치를 고쳤습니다. 원래 좌표도 함께 남겨 두었습니다.', 3000);
+}
+</script>
+<script>
+/* ── 내려받기 — 엑셀 한 장 + 사진·영상 폴더를 압축파일 하나로 ──── */
+async function doExport(){
+  if(!records.length){ toast('내려받을 기록이 없습니다.'); return; }
+
+  const first = records[records.length-1].createdAt;
+  const fd = new Date(first);
+  const defFrom = fd.getFullYear()+'-'+pad(fd.getMonth()+1)+'-'+pad(fd.getDate());
+
+  await dialog({
+    title:'기록 내려받기',
+    text:'엑셀 한 장과 사진·영상 폴더가 압축파일 하나로 받아집니다.',
+    html:
+      '<label for="exMode">받을 범위</label>'+
+      '<select id="exMode">'+
+        '<option value="all">전체 ('+records.length+'개)</option>'+
+        '<option value="range">기간 골라 받기</option>'+
+      '</select>'+
+      '<div id="exRange" style="display:none">'+
+        '<label for="exFrom">시작일</label><input type="date" id="exFrom" value="'+defFrom+'">'+
+        '<label for="exTo">끝일</label><input type="date" id="exTo" value="'+todayStr()+'">'+
+      '</div>',
+    yes:'받기', no:'그만두기',
+    after:()=>{
+      const sel=$('#exMode');
+      sel.onchange=()=>{ $('#exRange').style.display = sel.value==='range' ? '' : 'none'; };
+    },
+    hold: async (done)=>{
+      const mode = $('#exMode').value;
+      let list = records.slice();
+      if(mode==='range'){
+        const f=$('#exFrom').value, t=$('#exTo').value;
+        const fMs = f? new Date(f+'T00:00:00').getTime() : null;
+        const tMs = t? new Date(t+'T23:59:59.999').getTime() : null;
+        list = list.filter(r=>(fMs==null||r.createdAt>=fMs) && (tMs==null||r.createdAt<=tMs));
+      }
+      if(!list.length){ dlgProg(''); toast('그 기간에는 기록이 없습니다.'); return; }
+
+      let bytes = 0;
+      list.forEach(r=>(r.media||[]).forEach(m=>bytes+=(m.size||0)));
+      dlgProg('묶는 중… 0 / '+list.length+'개 ('+mb(bytes)+')');
+
+      try{
+        const zip = new JSZip();
+        const folder = zip.folder('사진영상');
+        const rows = [[
+          '번호','날짜','시각','위도','경도','오차(m)','고도(m)','고도오차(m)','방위(도)',
+          '위치 손봄','원래 위도','원래 경도','메모','파일'
+        ]];
+
+        list.sort((a,b)=>a.createdAt-b.createdAt);
+        for(let i=0;i<list.length;i++){
+          const r = list[i];
+          const d = new Date(r.createdAt);
+          const stamp = fileStamp(r.createdAt);
+          const names = [];
+          const media = r.media||[];
+          for(let j=0;j<media.length;j++){
+            const m = media[j];
+            let ext = 'jpg';
+            if(m.type==='video'){
+              ext = (m.mime||'').includes('mp4') ? 'mp4' : 'webm';
+            }
+            const nm = stamp + (media.length>1 ? '_'+(j+1) : '') + '.' + ext;
+            names.push(nm);
+            folder.file(nm, m.blob);
+          }
+          rows.push([
+            i+1,
+            d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()),
+            pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds()),
+            r.lat!=null ? Number(r.lat.toFixed(6)) : '',
+            r.lng!=null ? Number(r.lng.toFixed(6)) : '',
+            r.acc!=null ? Number(r.acc.toFixed(1)) : '',
+            r.alt!=null ? Number(r.alt.toFixed(1)) : '',
+            r.altAcc!=null ? Number(r.altAcc.toFixed(1)) : '',
+            r.heading!=null ? Number(r.heading.toFixed(0)) : '',
+            r.moved ? '예' : '',
+            (r.moved && r.origLat!=null) ? Number(r.origLat.toFixed(6)) : '',
+            (r.moved && r.origLng!=null) ? Number(r.origLng.toFixed(6)) : '',
+            r.memo||'',
+            names.join(', ')
+          ]);
+          if((i+1)%5===0 || i===list.length-1)
+            dlgProg('묶는 중… '+(i+1)+' / '+list.length+'개 ('+mb(bytes)+')');
+          await new Promise(r2=>setTimeout(r2,0));   // 화면이 멈추지 않게
+        }
+
+        const ws = XLSX.utils.aoa_to_sheet(rows);
+        ws['!cols'] = [{wch:5},{wch:11},{wch:9},{wch:11},{wch:12},{wch:8},{wch:8},
+                       {wch:10},{wch:8},{wch:9},{wch:11},{wch:12},{wch:44},{wch:30}];
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, '기록');
+        const xl = XLSX.write(wb, {bookType:'xlsx', type:'array'});
+        zip.file('기록.xlsx', xl);
+
+        dlgProg('압축하는 중… 잠시 기다려 주십시오.');
+        const out = await zip.generateAsync({type:'blob', compression:'STORE'},
+          meta=>{ if(meta.percent) dlgProg('압축하는 중… '+Math.round(meta.percent)+'%'); });
+
+        const url = URL.createObjectURL(out);
+        const a = el('a');
+        a.href = url;
+        a.download = '지도일기_'+todayStr().replace(/-/g,'')+'.zip';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(()=>URL.revokeObjectURL(url), 60000);
+        dlgProg('');
+        done(true);
+        toast('내려받았습니다. 기록 '+list.length+'개 ('+mb(out.size)+')', 3600);
+      }catch(e){
+        dlgProg('');
+        toast('내려받지 못했습니다. 기간을 좁혀 다시 해보십시오.', 3600);
+      }
+    }
+  });
+}
+
+/* ── 화면 바꾸기 ───────────────────────────────────────────────── */
+function goMap(){
+  $('#mapPage').classList.add('on'); $('#listPage').classList.remove('on');
+  $('#navMap').classList.add('on');  $('#navList').classList.remove('on');
+  setTimeout(()=>map && map.invalidateSize(), 80);
+}
+function goList(){
+  if(fixRec) return toast('핀 손보기를 먼저 마쳐 주십시오.');
+  $('#listPage').classList.add('on'); $('#mapPage').classList.remove('on');
+  $('#navList').classList.add('on');  $('#navMap').classList.remove('on');
+}
+
+async function loadRecords(){
+  try{ records = await DB.all(); }
+  catch(e){ records = []; toast('저장된 기록을 읽지 못했습니다.'); }
+  $('#hdrSub').textContent = records.length ? records.length+'개' : '';
+  renderList();
+}
+
+/* ── 단추 이어 붙이기 ──────────────────────────────────────────── */
+$('#navMap').onclick  = goMap;
+$('#navList').onclick = goList;
+$('#navShoot').onclick = ()=>{
+  if(fixRec) return toast('핀 손보기를 먼저 마쳐 주십시오.');
+  try{ history.pushState({v:'cam'},''); }catch(e){}
+  CAM.open();
+};
+$('#camClose').onclick = async ()=>{
+  if(CAM.isRec()){ CAM.stopRec(); return; }
+  CAM.close();
+};
+$('#camErrBtn').onclick = ()=>CAM.close();
+$('#mPhoto').onclick = ()=>CAM.setMode('photo');
+$('#mVideo').onclick = ()=>CAM.setMode('video');
+$('#shutter').onclick = ()=>{
+  if(CAM.mode()==='photo') CAM.takePhoto();
+  else { if(CAM.isRec()) CAM.stopRec(); else CAM.startRec(); }
+};
+$('#camDone').onclick = ()=>CAM.save();
+$('#sheetClose').onclick = closeSheet;
+$('#sheet').onclick = e=>{ if(e.target.id==='sheet') closeSheet(); };
+$('#btnExport').onclick = doExport;
+$('#fixSave').onclick = saveFix;
+$('#fixCancel').onclick = ()=>{ endFix(); toast('그대로 두었습니다.'); };
+
+let srchT=null;
+$('#srch').oninput = ()=>{ clearTimeout(srchT); srchT=setTimeout(renderList,160); };
+$('#dFrom').onchange = renderList;
+$('#dTo').onchange   = renderList;
+$('#dClear').onclick = ()=>{
+  $('#srch').value=''; $('#dFrom').value=''; $('#dTo').value=''; renderList();
+};
+
+/* 뒤로 가기로 창을 닫게 */
+window.addEventListener('popstate', ()=>{
+  if($('#cam').classList.contains('on')) CAM.close();
+  else if($('#sheet').classList.contains('on')) closeSheet();
+  else if(fixRec) endFix();
+});
+
+/* ── 시작 ──────────────────────────────────────────────────────── */
+(async function start(){
+  initMap();
+  await loadRecords();
+
+  // 첫 화면은 전국을 보여준다. 위치는 조용히 받아 두되 지도를 옮기지는 않는다.
+  GPS.start();
+  GPS.on(fix=>{ if(fix) showMe(fix); });
+
+  const hint = $('#mapHint');
+  if(!records.length){
+    hint.innerHTML = '아래 가운데 <b>●</b> 단추를 누르면 촬영 화면이 열립니다. 찍은 자리가 그대로 지도에 남습니다.';
+    hint.style.display='';
+    setTimeout(()=>{ hint.style.display='none'; }, 9000);
+  }
+
+  // 저장 공간이 얼마나 남았는지 (쓸 수 있는 브라우저에서만)
+  if(navigator.storage && navigator.storage.estimate){
+    try{
+      const q = await navigator.storage.estimate();
+      if(q.quota && q.usage/q.quota > 0.85){
+        toast('기기 저장 공간이 거의 찼습니다. 기록을 내려받아 두고 지워 주십시오.', 4200);
+      }
+      // 브라우저가 저장을 함부로 지우지 않도록 요청
+      if(navigator.storage.persist) navigator.storage.persist().catch(()=>{});
+    }catch(e){}
+  }
+})();
+</script>
+</body>
+</html>
